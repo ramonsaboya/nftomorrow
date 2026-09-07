@@ -1,0 +1,23 @@
+{
+  "name": "nftomorrow",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Tomorrowland NFT floors and Medallion alerts for one WhatsApp group",
+  "type": "module",
+  "engines": {
+    "node": ">=22.23.2 <23 || >=24 <25"
+  },
+  "scripts": {
+    "check": "node --env-file-if-exists=.env src/cli.js check",
+    "pair": "node --env-file-if-exists=.env src/cli.js pair",
+    "groups": "node --env-file-if-exists=.env src/cli.js groups",
+    "send-test": "node --env-file-if-exists=.env src/cli.js send-test",
+    "test": "node --test",
+    "verify": "node scripts/check-syntax.js && node --test"
+  },
+  "dependencies": {
+    "@whiskeysockets/baileys": "7.0.0-rc14",
+    "pino": "10.3.1",
+    "qrcode-terminal": "0.12.0"
+  }
+}
