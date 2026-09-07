@@ -16,7 +16,7 @@
 - Verified the compact message against live Magic Eden and CoinGecko USD prices. USD conversion worked without an API key in this check. Automated coverage checks matching total/rate conversion and suppresses stale fiat values.
 - Removed the old verbose message layout, change comparisons, marketplace-link formatter and test-message preamble/footer. Pricing caveats remain documented in README. No new dependency was needed.
 
-The repository includes Linux CI for Node 22 and 24. It has not yet been verified on GitHub.
+The repository includes Linux CI for Node 22 and 24. Hosted GitHub Actions results have not been inspected. The full suite also passed directly on the Linux Droplet with Node 24.20.0.
 
 ## Continuous monitor validation
 
@@ -24,6 +24,15 @@ Automated tests verify the approved hourly repeat behavior below 6,500 USD, stri
 
 The user deferred email configuration until after deployment. The Healthchecks client and runtime integration are implemented, but actual emails require three check URLs and verified email integrations.
 
+## Droplet deployment verified
+
+- Deployed published application revision `a461941972ef7cf7bc4c3d3760a2b3360c055aaa` to Ubuntu 24.04 with verified Node 24.20.0, a non-root systemd service, an SSH-only inbound firewall, enabled unattended updates, bounded journald storage and 1 GB swap on the selected 512 MB host.
+- All 32 tests and syntax checks passed on Linux; dependency audit found zero vulnerabilities.
+- A consistent SQLite backup was transferred over SSH, preserving the existing paired WhatsApp session. The live service connected without another QR scan and completed fresh Magic Eden/CoinGecko checks.
+- `systemctl` reports active/running and enabled at boot. An intentional restart succeeded, reconnecting and checking prices. Sample steady memory was about 53 MiB, with no automatic restarts or swap use observed; this is a short observation, not a load/soak test.
+- Verified private file ownership/modes and removed temporary credential-transfer files and installation cache. Credentials/config remain outside Git. Only the server should use the paired session from now on; the local snapshot becomes stale as server keys evolve.
+- Email check URLs are unset by user choice, and the service reports this explicitly.
+
 ## Not exercised live
 
-Actual recipient notifications; Healthchecks email; Linux service deployment verification, reboot or restoration; and a full daily cycle. Simulated tests do not prove these behaviors. The price snapshot is a one-time fetch, not evidence of continuous monitoring.
+Server-originated message delivery and actual phone notifications; Healthchecks email; a host reboot or restoration; and a full daily cycle. Simulated tests do not prove these behaviors. The price snapshot is a one-time fetch, not evidence of continuous monitoring.
