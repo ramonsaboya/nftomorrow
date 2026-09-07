@@ -1,6 +1,6 @@
 import { withTimeout } from './http.js';
 
-// One-shot CLI only: a long-lived monitor must not call process.exit here.
+// Call only after a command finishes or the service intentionally shuts down.
 // Baileys' WebSocket close handshake can wait 30s and its internal timers can
 // outlive an operation. Finish application writes before ending the process.
 export async function finishCommand({ whatsapp, activeTask, store, release, graceMs = 2000 }) {

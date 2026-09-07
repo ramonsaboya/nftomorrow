@@ -8,6 +8,7 @@
     "node": ">=22.23.2 <23 || >=24 <25"
   },
   "scripts": {
+    "start": "node --env-file-if-exists=.env src/service.js",
     "check": "node --env-file-if-exists=.env src/cli.js check",
     "pair": "node --env-file-if-exists=.env src/cli.js pair",
     "groups": "node --env-file-if-exists=.env src/cli.js groups",

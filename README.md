@@ -1,12 +1,40 @@
 # nftomorrow
 
-A small Node.js service in development for Tomorrowland NFT floor prices and alerts to one WhatsApp group. Repository: [ramonsaboya/nftomorrow](https://github.com/ramonsaboya/nftomorrow).
+Tomorrowland NFT floor prices for one WhatsApp group, using Node.js, Baileys and SQLite. No AI, website, wallet access, purchases, trading or inbound chatbot.
 
-**Status: price checks and one-off WhatsApp delivery work; unattended monitoring awaits alert-policy confirmation and implementation.** The DigitalOcean Droplet is available and SSH access has been verified, but the service is not deployed. The user has paired the bot and confirmed receiving a test message. This version includes read-only price checks, interactive pairing/group discovery, a one-message test command, SQLite persistence and tested transport components.
+## Behavior
 
-## Local use
+- Check all three Magic Eden collections hourly, 24/7, and once on startup or reconnection.
+- Alert when the full Medallion costs **less than 6,500 USD**, using a fresh CoinGecko SOL/USD rate. Repeat on every hourly check while below. Exactly 6,500 does not trigger. There is no recovery margin or crossing-only rule.
+- Daily summary at **18:00 Europe/London**, following daylight saving, if no alert was attempted since the previous daily slot. Combine a coincident alert and summary into one message.
+- Checks can detect a dip up to an hour late and miss short dips. “Immediately” means immediately after a check detects the threshold.
+- Reconnects and restarts fetch current prices; they do not replay queued messages. Already-attempted alerts are not duplicated within the same UTC hour. First installation waits for the next daily slot; after downtime, at most the latest missed daily summary is sent with fresh prices.
+- Persist history, authentication, daily state and delivery bookkeeping. Continue price checks while WhatsApp is disconnected or requires re-pairing.
 
-Use an existing Node.js 24 LTS installation, or Node.js 22.23.2+. Node's built-in SQLite removes a separate database dependency; Node 22 emits an experimental SQLite warning. Do not install anything globally for this project.
+The original proposal in [docs/brief.md](docs/brief.md) is historical. The behavior above incorporates the user's later changes: 18:00, a 6,500 USD Medallion threshold and hourly repeat alerts.
+
+## Message
+
+```text
+Medallion: 6,734.35 USD (64.797 SOL)
+A Letter from the Universe: 49 SOL
+The Reflection of Love: 13.699 SOL
+The Symbol of Love and Unity: 2.098 SOL
+
+SOL -> USD: 103.93 USD
+
+Date checked: 07 Sept 2026, 18:11 BST
+```
+
+Illustrative prices. Alert messages append a short triggered-threshold line.
+
+Floors are lowest listed asking prices across aggregated marketplaces, excluding fees, not guaranteed sale values. The Medallion is the sum of the three floors. Invalid/missing/zero values invalidate a collection check; cached values never fill gaps. Stats have no guaranteed upstream listing freshness timestamp. Fiat rates older than five minutes never trigger fiat alerts. If FX fails, SOL stays available and the price health check fails.
+
+Sources: [Magic Eden stats API](https://docs.magiceden.io/reference/get_collections-symbol-stats), [CoinGecko simple price](https://docs.coingecko.com/demo/reference/simple-price).
+
+## Setup
+
+Use Node.js 24 LTS (22.23.2+ also tested). Node's built-in SQLite avoids a separate database dependency. Node 22 prints an experimental SQLite warning.
 
 ```sh
 npm ci --omit=optional
@@ -16,79 +44,48 @@ npm run verify
 npm run check
 ```
 
-`check` reads public prices and prints them. It does not connect to WhatsApp, write credentials/history, or send a message. The example configuration shows the Medallion total in USD and SOL, individual floors in SOL, the SOL/USD rate and a London-local check timestamp. Configuration files and local state are ignored by Git.
-
-The collection symbols are:
-
-| Target | Collection |
-| --- | --- |
-| `tomorrowland_winter` | A Letter from the Universe |
-| `the_reflection_of_love` | The Reflection of Love |
-| `tomorrowland_love_unity` | The Symbol of Love and Unity |
-| `medallion` | Sum of all three floors |
-
-Every check requests the three [Magic Eden stats endpoints](https://docs.magiceden.io/reference/get_collections-symbol-stats) with `listingAggMode=true`. Integer lamports are retained and converted to SOL for display. These are aggregated lowest asking prices, excluding fees, not guaranteed sale values. Zero, absent, nonnumeric and unsafe values invalidate a check; cached collection values never fill gaps. Local fetch age is checked, but the upstream collection stats do not provide a guaranteed listing freshness timestamp.
-
-## Configuration
-
-`displayCurrency` is `null` (unselected; read-only checks show SOL), `SOL`, `USD`, `GBP` or `EUR`. USD is the configured display currency. Display and threshold currencies are separate. For example, the following defines a threshold's data shape; **5 SOL is an illustration, not an accepted threshold, and threshold evaluation is not implemented yet**:
+Edit private `config.json`:
 
 ```json
 {
-  "groupId": null,
-  "displayCurrency": "GBP",
+  "groupId": "YOUR_GROUP_ID@g.us",
+  "displayCurrency": "USD",
+  "dailySummaryTime": "18:00",
   "thresholds": [
-    { "target": "medallion", "currency": "SOL", "below": 5 }
+    { "target": "medallion", "currency": "USD", "below": 6500 }
   ]
 }
 ```
 
-Allow at most one threshold for each target. Invalid fields fail validation rather than silently reverting to defaults. Keep thresholds empty until chosen.
+Allowed currencies: SOL, USD, GBP, EUR. Display and threshold currency are independent. Targets: `tomorrowland_winter`, `the_reflection_of_love`, `tomorrowland_love_unity`, `medallion`. At most one threshold per target; use an empty array for daily summaries only. Set a CoinGecko Demo key in `.env` if needed; it worked without a key in local validation. Private config, secrets and state are excluded from Git.
 
-USD/GBP/EUR uses [CoinGecko's Demo simple-price endpoint](https://docs.coingecko.com/demo/reference/simple-price). Put the Demo API key in `COINGECKO_DEMO_API_KEY`, never in the JSON or repository. The client sends a key when configured. An unavailable or rejected FX request preserves SOL prices, shows fiat as unavailable, and makes `check` exit with status 1. Rates must be positive and timestamped within five minutes. Do not use fiat thresholds until valid rates are available.
+## WhatsApp
 
-## WhatsApp setup
-
-Activate the dedicated Lyca SIM/eSIM, register its number in WhatsApp Business through SMS/call verification, set its display identity, and add it to the intended group with permission to post. In an interactive private SSH terminal:
+Regular WhatsApp and WhatsApp Business both work. Use the dedicated bot number, join the intended group and switch to that account on the phone before scanning.
 
 ```sh
 npm run pair
 npm run groups
 ```
 
-Scan the QR through WhatsApp Business → Linked devices. `pair` displays secrets only on an interactive terminal; never redirect or capture its output. `groups` prints group names and IDs locally. Copy the intended `...@g.us` ID into the private configuration. Neither command sends a chat message. Stop any future daemon before pairing or discovery; the data directory admits only one process.
-
-[Baileys session management](https://baileys.wiki/authentication/session-management) requires both credentials and Signal keys. The SQLite auth adapter uses `BufferJSON`, restores app-state protobuf values, and commits key batches before resolving. It does not use `useMultiFileAuthState`. Baileys protocol logs are disabled to protect account material. Database and lock files are mode 0600 inside a private directory; the data is not encrypted at rest.
-
-The adapter reconnects with delays from one second up to five minutes. A terminal authentication failure persists a need to re-pair; it does not erase price/history tables. Run `pair` explicitly to replace invalid auth. Reconnection emits a fresh-check callback, and the sender accepts only the configured group. The connection behavior is covered by simulated tests; restarting with a saved QR session and fetching groups have also been verified with a live account. QR sessions are recognized by the saved account identity, not the `registered` flag, which can remain false after successful pairing.
-
-### One-off delivery test
-
-After pairing, run `npm run groups` and set `groupId` in `config.json` to the intended group's ID. Then run:
+Scan the QR from Linked devices → Link a device. These commands require a private interactive terminal. Never redirect pairing output. Copy the intended group ID into `config.json`, then deliberately send one test:
 
 ```sh
 npm run send-test
 ```
 
-This command sends **one real message** to the configured group with a fresh set of all three floors and the Medallion total. It does not enable scheduled alerts. Check the message on a recipient phone, and check notifications separately. An acknowledgement alone does not prove either. Each invocation is a new deliberate test; if delivery is reported uncertain, inspect the group before running it again. Attempts are recorded in SQLite before sending and are never automatically retried by the test command.
+Each invocation sends one real message. An acknowledgement does not prove a recipient notification. If delivery is uncertain, inspect the group before retrying. User-confirmed test delivery is recorded in [validation](docs/validation.md).
 
-After a one-shot command completes, it finishes pending bookkeeping and allows up to two seconds for socket cleanup, then closes SQLite, releases the process lock, flushes terminal output and exits. It does not wait for all of Baileys' background timers or log out the paired account.
+Start the continuous monitor with `npm start`, or use [the systemd service](deploy/nftomorrow.service). **Only one machine may use the saved WhatsApp session at a time.** After deployment, use WhatsApp commands on the server with the service stopped. Local `npm run check` remains safe because it does not connect to WhatsApp.
 
-Baileys is unofficial and can break or lead to account restrictions. The npm `latest` version inspected for this implementation was `7.0.0-rc14`, a release candidate; it is pinned along with a lockfile and needs live acceptance before deployment.
+Baileys is unofficial. Its pinned npm release `7.0.0-rc14` can break or lead to account restrictions. We store credentials and Signal key batches transactionally using `BufferJSON`; no `useMultiFileAuthState`. QR sessions are recognized by the saved identity because `registered` may remain false after successful pairing. Protocol logging is disabled. State is private on disk, but not encrypted at rest. See [Baileys authentication](https://baileys.wiki/authentication/session-management).
 
-The primary bot WhatsApp Business account should be opened online weekly. Its linked-device inactivity rules and the Lyca number's activity rules are separate. See the original brief and [WhatsApp's linked-device help](https://faq.whatsapp.com/777829757305409); check current carrier rules when obtaining the SIM.
+Open the bot account online weekly; the primary-account inactivity rule is separate from keeping the Lyca number active. See [WhatsApp linked-device guidance](https://faq.whatsapp.com/378279804439436/).
 
-## Completion gate
+## Reliability and operations
 
-The following proposed rules remain unimplemented until confirmed:
+HTTP requests have timeouts and bounded retries. WhatsApp reconnects with capped exponential delays up to five minutes. No background retry resends old application messages. A unique delivery attempt and schedule state commit before sending. Interrupted/failed sends are marked uncertain and may have reached WhatsApp; to reduce duplicates we do not replay them or send an additional daily summary for that interval. A fresh alert is still allowed next hour. Exactly-once network delivery is not guaranteed.
 
-- First observation below a threshold alerts, including startup; simultaneous triggers combine.
-- No hourly repeats while below; recovery at 1% above the threshold re-arms it.
-- Daily summary at 20:00 Europe/London with daylight saving handling.
-- Suppress that summary if a threshold alert was sent since the previous daily slot; combine a coincident alert and summary.
+The service uses an OS-managed SQLite lock to exclude another process sharing the data directory. SIGTERM stops sending, finishes active bookkeeping, closes the socket with a short grace period, closes SQLite and releases the lock before exiting. Journald provides bounded logs on the deployed host. Price history retains approximately one year; delivery audit is retained separately.
 
-After confirmation, remaining implementation is the hourly runtime, threshold state machine, timezone scheduling, transactional delivery orchestration, operational pings and systemd service. Delivery bookkeeping primitives already preserve unique attempts and mark interrupted attempts uncertain. This is not yet end-to-end duplicate prevention. WhatsApp and a local SQLite transaction cannot provide exactly-once delivery; the final policy must distinguish failed, acknowledged and uncertain sends and avoid blindly replaying old messages.
-
-See [the original brief](docs/brief.md), [operations plan](docs/operations.md) and [validation record](docs/validation.md).
-
-No AI, website, wallet connection, purchases, trading, or inbound chatbot is included.
+Optional Healthchecks.io pings report process liveness, price failures and WhatsApp health. Email notifications require the three ping URLs and verified email integrations. **Email setup was deferred by the user until after deployment.** See [operations and restore instructions](docs/operations.md) and [validation and remaining checks](docs/validation.md).

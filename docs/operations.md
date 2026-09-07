@@ -1,42 +1,65 @@
-# Operations plan — deployment pending
+# Operations
 
-This is a runbook outline for the completed service. Do not configure systemd to run the current `check` command as if it were a continuous monitor. The runtime and unit file will follow confirmation of the alert rules.
+## Installed layout
 
-## Linux host
+DigitalOcean Ubuntu 24.04, dedicated non-root `nftomorrow` service user. The selected 512 MB Droplet has 1 GB swap. Node.js 24.20.0 comes from the official Linux archive with a verified SHA-256 checksum. SSH-key access works; UFW permits SSH and denies other inbound traffic. Unattended security updates are enabled. No inbound application port is required.
 
-Use a small Linux VPS with SSH-key access, an unprivileged `nftomorrow` service account, a firewall allowing only necessary SSH access, and automatic security updates. No inbound application port is needed. Check provider prices and location availability before purchasing; DigitalOcean has been selected and SSH access to an Ubuntu 24.04 Droplet has been verified. Node.js and the service are not yet installed.
+- `/opt/nftomorrow`: root-owned application and pinned dependencies.
+- `/opt/node-v24.20.0`: Node installation, linked from `/usr/local/bin`.
+- `/etc/nftomorrow/config.json`: root-owned private group and policy configuration, readable by the service group.
+- `/etc/nftomorrow/environment`: root-only environment file read by systemd; API and Healthchecks secrets.
+- `/var/lib/nftomorrow`: service-owned SQLite state, mode 0700; files mode 0600.
+- `/etc/systemd/system/nftomorrow.service`: non-root, restricted service, enabled at boot and restarted on failure.
 
-Planned paths:
+Journald storage is capped at 100 MB and retention at 14 days on this dedicated host. Check memory pressure before adding workloads. Node's V8 old-space limit is 192 MB; this does not cap total process/native memory.
 
-- `/opt/nftomorrow`: root-owned application release and pinned dependencies.
-- `/etc/nftomorrow/config.json`: private group, currencies, thresholds and approved policy.
-- `/etc/nftomorrow/environment`: mode 0600; API and Healthchecks secrets.
-- `/var/lib/nftomorrow`: service-owned state directory, mode 0700.
+## Service commands
 
-Use systemd with `User=nftomorrow`, `UMask=0077`, `Restart=on-failure`, `StateDirectory=nftomorrow`, `NoNewPrivileges=true`, `ProtectSystem=strict`, `ProtectHome=true`, and `PrivateTmp=true`. Allow writes only to the state directory. Use a pinned Node 24 executable available to the service, not an interactive shell's version-manager path. Enable the completed unit for reboot startup. Logs go to journald; set storage/retention limits appropriate for the dedicated host, such as a 100 MB cap and 14-day retention. Never enable verbose Baileys logging on the service.
+Run through SSH as the server administrator:
 
-## Healthchecks email
+```sh
+systemctl status nftomorrow --no-pager
+journalctl -u nftomorrow -n 40 --no-pager
+systemctl restart nftomorrow
+```
 
-Create three checks at [Healthchecks.io](https://healthchecks.io/), attach and verify the operator's email, and place each secret ping URL in its corresponding environment variable:
+For pairing, group discovery or an intentional test, stop the service first. Never run the same credentials concurrently on the Mac and server.
 
-| Variable | Intended service behavior | Suggested period / grace |
+```sh
+systemctl stop nftomorrow
+sudo -u nftomorrow env CONFIG_PATH=/etc/nftomorrow/config.json DATA_DIR=/var/lib/nftomorrow /usr/local/bin/node /opt/nftomorrow/src/cli.js pair
+sudo -u nftomorrow env CONFIG_PATH=/etc/nftomorrow/config.json DATA_DIR=/var/lib/nftomorrow /usr/local/bin/node /opt/nftomorrow/src/cli.js groups
+systemctl start nftomorrow
+```
+
+`pair` replaces unusable authentication when a persistent logout is recorded, keeping price and delivery records. For a one-message test, use `send-test` in place of `groups`. Commands above use public FX access; provide the configured API key through a private environment if your provider requires it. Do not copy the credential database, QR output or private environment into chat or Git.
+
+## Healthchecks email — next setup step
+
+Create three checks at [Healthchecks.io](https://healthchecks.io/), attach and verify the operator's email, and put the secret ping URLs in `/etc/nftomorrow/environment`:
+
+| Variable | Behavior | Period / grace |
 | --- | --- | --- |
-| `HEALTHCHECK_PRICES_URL` | Success after complete fresh price/required FX checks, failure otherwise | 1 hour / 10 minutes |
-| `HEALTHCHECK_WHATSAPP_URL` | Heartbeat while connected; immediate failure for logout; no success while disconnected | 1 minute / 10 minutes |
-| `HEALTHCHECK_PROCESS_URL` | Regular main-loop heartbeat independent of WhatsApp | 1 minute / 5 minutes |
+| `HEALTHCHECK_PRICES_URL` | Success after complete fresh price/FX checks, failure otherwise | 1 hour / 10 minutes |
+| `HEALTHCHECK_WHATSAPP_URL` | Heartbeat while connected; immediate failure for logout or uncertain delivery | 1 minute / 10 minutes |
+| `HEALTHCHECK_PROCESS_URL` | Main-loop heartbeat | 1 minute / 5 minutes |
 
-The HTTP helper implements success and `/fail` pings without logging tokens. **Runtime wiring and real email verification remain pending.** Healthchecks performs email delivery; the application does not need SMTP credentials. Configure descriptive check names so the WhatsApp check says that re-pairing or connection investigation is needed. Network loss can prevent failure pings; the external missing-heartbeat deadline covers that case. Consult the [ping API](https://healthchecks.io/docs/http_api/) and test both failure and recovery notifications before relying on it.
+Restart the service after editing. When disconnected temporarily, WhatsApp success pings stop; the grace period triggers the notification. A persistent logout sends `/fail` immediately when networking permits. Name that check “NFTomorrow WhatsApp: reconnect or re-pair required”. If all networking is lost, external missing-heartbeat detection covers the outage. HTTP ping failures are logged without exposing URLs.
+
+Do a deliberate failure/recovery test of each check and confirm actual email receipt. This integration is **not active until URLs and verified email notifications are configured**. The [ping API](https://healthchecks.io/docs/http_api/) does the email delivery, so no SMTP credentials are needed.
 
 ## Backup and restore
 
-Keep code and its lockfile in Git. Keep private configuration and the entire SQLite state outside Git in encrypted, access-controlled backups. The state includes account credentials; a backup grants access to the bot. Provider disk backups alone do not establish a successful application restore.
+Code and lockfile live in Git. Back up the private configuration and SQLite state in encrypted, access-controlled storage. A state backup contains account credentials. No off-server backup destination has been configured yet.
 
-For a simple consistent backup, stop the service before copying its state directory and private configuration, then restart it. Include SQLite WAL/SHM files if present; never copy only a live database file. Do not archive pairing QR output. A future online backup command can use SQLite's backup API if uninterrupted monitoring is needed.
+For a simple consistent backup, stop the service before copying its state directory and private configuration, then restart it. Include any WAL/SHM files. Never copy only a live SQLite database. Alternatively use Node's SQLite backup API while holding the application's instance lock; the initial transfer used that API.
 
-To restore: stop the original instance, install the same application/dependency versions on the replacement host, restore configuration and all state, set ownership and private modes, verify data locally, then start one instance. Never run the same WhatsApp identity concurrently from a restored backup and the original server. A restored session can be invalid; if so, stop the service and run the interactive `pair` command under its account. Explicit re-pairing replaces only unusable authentication and keeps price and delivery data.
+To restore: stop the original instance, install the same application/dependency versions on the replacement host, restore state/config, set ownership and modes, verify locally, then start just one instance. If WhatsApp rejects a restored session, stop the service and explicitly re-pair. A stale backup can lack recent delivery attempts; review that before resuming sends.
 
-Verify price checks, group identity, Healthchecks and actual recipient delivery after any restore. A stale backup can lack recent delivery records, so review potential duplicate alerts before resuming sending.
+## Updates
 
-## Live acceptance still required
+Use the published Git commit and `package-lock.json`. Stop the service, back up state, deploy the verified release, run `npm ci --omit=optional`, then run syntax/tests as the service user and restart. On this small server use `node --test --test-concurrency=1` to limit test-process memory. Keep secrets/state outside the release directory. After deployment verify the configured group, price checks, connection status and memory; do not treat a send acknowledgement as a recipient notification.
 
-After the policy and runtime are complete, obtain server authorization, the activated bot account, exact group, thresholds, currencies, summary time and operator email. Verify one explicitly authorized group message on a recipient device. Observe a complete daily cycle, overnight threshold behavior, timezone behavior, reconnection and a reboot. Test logout/re-pairing deliberately with the owner present. A Baileys acknowledgement is not evidence of a recipient notification.
+## Outstanding acceptance
+
+Verify reboot recovery, a restoration, a full live daily cycle including overnight conditions, email notifications and actual phone notifications. Automated tests cover scheduling, restart persistence and disconnection semantics but cannot establish those live outcomes.

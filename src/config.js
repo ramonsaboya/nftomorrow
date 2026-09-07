@@ -5,11 +5,14 @@ import { TARGETS } from './collections.js';
 const currencies = ['SOL', 'USD', 'GBP', 'EUR'];
 export function validateConfig(config) {
   if (!config || typeof config !== 'object' || Array.isArray(config)) throw new Error('Config must be an object');
-  const allowed = ['groupId', 'displayCurrency', 'thresholds'];
+  const allowed = ['groupId', 'displayCurrency', 'thresholds', 'dailySummaryTime'];
   if (Object.keys(config).some((key) => !allowed.includes(key))) throw new Error('Unknown config option');
   if (config.groupId != null && !/^\d+(?:-\d+)?@g\.us$/.test(config.groupId)) throw new Error('groupId must be a WhatsApp group JID');
   if (config.displayCurrency != null && !currencies.includes(config.displayCurrency)) throw new Error('displayCurrency must be SOL, USD, GBP, EUR or null');
   if (!Array.isArray(config.thresholds)) throw new Error('thresholds must be an array');
+  if (config.dailySummaryTime !== undefined && !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(config.dailySummaryTime)) {
+    throw new Error('dailySummaryTime must be HH:mm in Europe/London');
+  }
   const seen = new Set();
   for (const threshold of config.thresholds) {
     if (!threshold || Object.keys(threshold).some((key) => !['target', 'currency', 'below'].includes(key))
