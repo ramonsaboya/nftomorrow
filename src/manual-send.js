@@ -3,14 +3,14 @@ import { fetchSnapshot } from './prices.js';
 import { formatPrices } from './message.js';
 
 export async function sendPriceTest({ config, store, whatsapp, apiKey = '',
-  getSnapshot = fetchSnapshot, now = Date.now, prefix = '' }) {
+  getSnapshot = fetchSnapshot, now = Date.now }) {
   if (!/^\d+(?:-\d+)?@g\.us$/.test(config.groupId ?? '') || config.groupId !== whatsapp.groupId) {
     throw new Error('Set groupId in config.json to the intended group from npm run groups');
   }
   const snapshot = await getSnapshot(config, { apiKey });
-  const text = [prefix, formatPrices(snapshot, {
+  const text = formatPrices(snapshot, {
     displayCurrency: config.displayCurrency, now: now(),
-  })].filter(Boolean).join('\n\n');
+  });
   if (!whatsapp.connected) throw new Error('WhatsApp disconnected before the test; no send attempted');
   const id = `3EB0${randomBytes(14).toString('hex').toUpperCase()}`;
   // Reserve durably before the network call. Never automatically retry an

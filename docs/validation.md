@@ -33,8 +33,9 @@ The user deferred email configuration until after deployment. The Healthchecks c
 - Verified private file ownership/modes and removed temporary credential-transfer files and installation cache. Credentials/config remain outside Git. Only the server should use the paired session from now on; the local snapshot becomes stale as server keys evolve.
 - Email check URLs are unset by user choice, and the service reports this explicitly.
 
-- Ran an explicitly authorized Droplet-origin test as a transient systemd service under the service account. The remote helper fetched DigitalOcean metadata, generated a verification code on-host, and stored the exact message in SQLite before sending. The send was acknowledged, matching server journal and delivery records. The Mac database had no record with that message ID. The normal monitor resumed successfully. This is execution evidence, not WhatsApp-provided cryptographic machine attestation.
+- User confirmed receiving the explicitly authorized Droplet-origin test. The temporary origin-verification helper, message prefix and standalone evidence file were then removed at the user's request. The regular compact message format is restored; historical delivery audit and journal entries remain.
+
 
 ## Not exercised live
 
-Recipient confirmation of the Droplet-origin test and actual phone notifications; Healthchecks email; a host reboot or restoration; and a full daily cycle. Simulated tests do not prove these behaviors. The price snapshot is a one-time fetch, not evidence of continuous monitoring.
+Actual phone notifications; Healthchecks email; a host reboot or restoration; and a full daily cycle. Simulated tests do not prove these behaviors. The price snapshot is a one-time fetch, not evidence of continuous monitoring.

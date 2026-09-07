@@ -63,36 +63,3 @@ Use the published Git commit and `package-lock.json`. Stop the service, back up 
 ## Outstanding acceptance
 
 Verify reboot recovery, a restoration, a full live daily cycle including overnight conditions, email notifications and actual phone notifications. Automated tests cover scheduling, restart persistence and disconnection semantics but cannot establish those live outcomes.
-
-## Independently checking a Droplet-origin test
-
-The operator-only `scripts/prove-origin.js` obtains the Droplet ID and public IPv4 from DigitalOcean's link-local metadata service, generates a random code on the server, and includes them in one test message. It writes the same code, remote PID, revision and acknowledged WhatsApp message ID to `/var/lib/nftomorrow/origin-test.json` and the systemd journal. SQLite contains the exact sent text and matching message ID.
-
-From DigitalOcean's web console, inspect:
-
-```sh
-cat /var/lib/nftomorrow/origin-test.json
-journalctl -u nftomorrow-origin-test --no-pager -o cat
-curl -fsS http://169.254.169.254/metadata/v1/id
-curl -fsS http://169.254.169.254/metadata/v1/interfaces/public/0/ipv4/address
-```
-
-Compare the code with the WhatsApp message and the Droplet identity with the DigitalOcean dashboard. This is inspectable execution evidence, not cryptographic attestation: WhatsApp itself does not expose the originating linked machine, and a label alone is not proof. For a test independent of the Mac, run the helper from the DigitalOcean console on another device while the Mac is powered off. Stop the main service before any such test and restart it afterwards.
-
-To repeat independently with the Mac switched off, open DigitalOcean's Droplet console on another device and run as root (this deliberately sends a new message):
-
-```sh
-bash <<'REMOTE_TEST'
-set -eu
-trap 'systemctl start nftomorrow' EXIT
-systemctl stop nftomorrow
-test_ip=$(curl -fsS http://169.254.169.254/metadata/v1/interfaces/public/0/ipv4/address)
-systemd-run --unit=nftomorrow-origin-test \
-  --property=User=nftomorrow --property=Group=nftomorrow \
-  --property=WorkingDirectory=/opt/nftomorrow \
-  --property=EnvironmentFile=/etc/nftomorrow/environment \
-  --property=RuntimeMaxSec=150 --wait \
-  /usr/local/bin/node /opt/nftomorrow/scripts/prove-origin.js "$test_ip"
-cat /var/lib/nftomorrow/origin-test.json
-REMOTE_TEST
-```

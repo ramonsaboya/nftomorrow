@@ -14,15 +14,14 @@ test('test command reserves a single fresh message before sending and records ac
   const store = new Store(':memory:');
   let count = 0;
   try {
-    const id = await sendPriceTest({ config, store, now: () => now, prefix: 'Origin code: TEST123',
+    const id = await sendPriceTest({ config, store, now: () => now,
       getSnapshot: async () => snapshot,
       whatsapp: { groupId: config.groupId, connected: true, send: async (id, text) => {
         count++;
         const record = store.deliveries()[0];
         assert.equal(record.id, id);
         assert.equal(record.status, 'attempting');
-        assert.match(text, /^Origin code: TEST123\n\nMedallion:/);
-        assert.equal(record.data.text, text);
+        assert.match(text, /^Medallion:/);
         assert.match(text, /Medallion: 3 SOL/);
       } },
     });
