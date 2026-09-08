@@ -42,6 +42,11 @@ export function loadConfig(env = process.env) {
         || !/^\/[0-9a-f-]{36}$/i.test(url.pathname)) throw new Error(`Invalid ${name}`);
     healthUrls[check] = value.replace(/\/$/, '');
   }
+  const quality = env.OPENAI_IMAGE_QUALITY || 'medium';
+  const dailyLimit = Number(env.STICKER_DAILY_LIMIT || '20');
+  if (!['low', 'medium', 'high'].includes(quality)) throw new Error('Invalid OPENAI_IMAGE_QUALITY');
+  if (!Number.isSafeInteger(dailyLimit) || dailyLimit < 1 || dailyLimit > 1000) throw new Error('Invalid STICKER_DAILY_LIMIT');
   return { config, dataDir: resolve(env.DATA_DIR || 'data'), healthUrls,
+    imageStickers: { apiKey: env.OPENAI_API_KEY?.trim() || '', quality, dailyLimit },
     apiKey: env.COINGECKO_DEMO_API_KEY || '' };
 }

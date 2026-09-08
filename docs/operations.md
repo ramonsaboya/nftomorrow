@@ -19,6 +19,8 @@ For current NFT prices, send `/status` from another WhatsApp account in the conf
 
 The feature branch also supports `/sticker-test` in the configured group or a one-to-one chat with the bot for one fixed native sticker reply in the same chat, with a separate one-minute cooldown per chat. See [prototype test/deployment instructions](sticker-prototype.md) and [validation](validation.md) for its live activation state.
 
+The GPT Image 2 feature adds `/sticker <prompt>` using the source reference photo. Configure its separate API key and daily limit using [image sticker setup](image-stickers.md). API work is bounded and runs independently of the monitor. Its live activation state is separate from the fixed sticker prototype.
+
 Run through SSH as the server administrator:
 
 ```sh
@@ -62,7 +64,7 @@ To restore: stop the original instance, install the same application/dependency 
 
 ## Updates
 
-Use the published Git commit and `package-lock.json`. Stop the service, back up state, deploy the verified release, run `npm ci --omit=optional`, then run syntax/tests as the service user and restart. On this small server use `node --test --test-concurrency=1` to limit test-process memory. Keep secrets/state outside the release directory. After deployment verify the configured group, price checks, connection status and memory; do not treat a send acknowledgement as a recipient notification.
+Use the published Git commit and `package-lock.json`. Stage and verify the code before stopping the service. Install with `npm ci --include=optional`: Sharp requires its platform-specific binary packages. `npm run verify` runs tests serially to limit test-process memory. Keep secrets/state outside the release directory. Stop the sole service, retain the prior code release for rollback, swap code and restart. A code-only update without schema changes keeps the existing session/state in place; do not transfer or restore old session keys. After deployment verify the configured group, price checks, connection status and memory; do not treat a send acknowledgement as a recipient notification.
 
 ## Outstanding acceptance
 

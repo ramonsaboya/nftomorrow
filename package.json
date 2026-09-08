@@ -14,11 +14,12 @@
     "groups": "node --env-file-if-exists=.env src/cli.js groups",
     "send-test": "node --env-file-if-exists=.env src/cli.js send-test",
     "test": "node --test",
-    "verify": "node scripts/check-syntax.js && node --test"
+    "verify": "node scripts/check-syntax.js && node --test --test-concurrency=1"
   },
   "dependencies": {
     "@whiskeysockets/baileys": "7.0.0-rc14",
     "pino": "10.3.1",
-    "qrcode-terminal": "0.12.0"
+    "qrcode-terminal": "0.12.0",
+    "sharp": "0.35.4"
   }
 }

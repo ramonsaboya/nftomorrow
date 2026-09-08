@@ -3,6 +3,7 @@ import pino from 'pino';
 import { sqliteAuth } from './auth.js';
 import { withTimeout } from './http.js';
 import { isStickerChat, validateSticker } from './sticker.js';
+import { validateGeneratedSticker } from './generated-sticker.js';
 
 export class WhatsApp {
   constructor({ store, groupId, onFresh = () => {}, onStatus = () => {}, onCommand = () => {}, onQr,
@@ -67,6 +68,9 @@ export class WhatsApp {
           if ((command === '/status' && key.remoteJid === this.groupId)
               || (command === '/sticker-test' && isStickerChat(key.remoteJid, this.groupId))) {
             this.onCommand(key.id, command, message);
+          } else if (typeof text === 'string' && /^\/sticker(?:\s|$)/i.test(text.trim())
+              && isStickerChat(key.remoteJid, this.groupId)) {
+            this.onCommand(key.id, '/sticker', message, text.trim().slice(8).trim());
           }
         }
       });
@@ -131,21 +135,30 @@ export class WhatsApp {
   }
   async sendSticker(id, stickerBuffer, quotedMessage) {
     validateSticker(stickerBuffer);
+    return this.#reply(id, { sticker: stickerBuffer, mimetype: 'image/webp' }, quotedMessage);
+  }
+  async sendGeneratedSticker(id, stickerBuffer, quotedMessage) {
+    await validateGeneratedSticker(stickerBuffer);
+    return this.#reply(id, { sticker: stickerBuffer, mimetype: 'image/webp' }, quotedMessage);
+  }
+  async replyText(id, text, quotedMessage) {
+    return this.#reply(id, { text, linkPreview: null }, quotedMessage);
+  }
+  async #reply(id, content, quotedMessage) {
     const key = quotedMessage?.key;
     if (!key || key.fromMe || typeof key.id !== 'string' || !key.id.trim()
         || !isStickerChat(key.remoteJid, this.groupId)) {
       throw new Error('Invalid quoted sticker command');
     }
-    return this.#sendContent(id, { sticker: stickerBuffer, mimetype: 'image/webp' },
-      { quoted: quotedMessage });
+    return this.#sendContent(id, content, { quoted: quotedMessage }, true);
   }
-  async #sendContent(id, content, options = {}) {
+  async #sendContent(id, content, options = {}, isReply = false) {
     if (!this.connected || !this.socket) throw new Error('WhatsApp unavailable');
-    const recipient = content.sticker ? options.quoted?.key?.remoteJid : this.groupId;
-    if (content.sticker) {
+    const recipient = isReply ? options.quoted?.key?.remoteJid : this.groupId;
+    if (isReply) {
       if (!isStickerChat(recipient, this.groupId)) throw new Error('Invalid sticker reply destination');
     } else if (!/^\d+(?:-\d+)?@g\.us$/.test(recipient ?? '')) throw new Error('Invalid configured group');
-    // Sticker replies follow their incoming command; text stays in the configured group.
+    // Command replies follow their trigger; automatic price text stays in the group.
     const result = await withTimeout(this.socket.sendMessage(recipient,
       content, { ...options, messageId: id }), 30_000);
     if (result?.key?.id !== id) throw new Error('Missing WhatsApp send acknowledgement');

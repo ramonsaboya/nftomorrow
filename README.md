@@ -1,6 +1,6 @@
 # nftomorrow
 
-Tomorrowland NFT floor prices for one WhatsApp group, using Node.js, Baileys and SQLite. Supports incoming `/status` and `/sticker-test` commands. No runtime AI, website, wallet access, purchases or trading.
+Tomorrowland NFT floor prices for one WhatsApp group, using Node.js, Baileys and SQLite. Supports `/status`, fixed `/sticker-test` replies, and optional GPT Image 2 edits with `/sticker <prompt>`. No website, wallet access, purchases or trading.
 
 ## Behavior
 
@@ -12,7 +12,8 @@ Tomorrowland NFT floor prices for one WhatsApp group, using Node.js, Baileys and
 - Persist history, authentication, daily state and delivery bookkeeping. Continue price checks while WhatsApp is disconnected or requires re-pairing.
 - Send `/status` in the configured WhatsApp group for a fresh check of the three NFT floors, Medallion total, exchange rate and check time. Any group member can use it. Replies use the message format below, independently of hourly alerts and the daily summary. Failed price checks return an unavailable message; missing FX still shows SOL prices.
 - `/sticker-test` works in the configured group or a one-to-one chat with the bot. It replies in that same chat with one fixed, pre-generated robot DJ artwork as a native WhatsApp sticker, quoting the command. The image is loaded locally; each request makes no image-generation API call. See [the sticker prototype](docs/sticker-prototype.md) for assets, validation and testing.
-- Both commands accept plain text (case-insensitive, surrounding spaces allowed), including disappearing text messages. Other commands, unconfigured groups and the bot's own messages are ignored; `/status` is group-only. Status has a one-minute group cooldown; stickers have a one-minute cooldown per chat. Each handler allows only one request pending or running at a time; extra requests are silently ignored. History, messages older than five minutes, and messages predating the current connection are ignored. Duplicate requests are suppressed, acceptance survives restart, and uncertain replies are never automatically retried.
+- `/sticker <prompt>` edits the [default reference photo](assets/stickers/default-reference.png) with `gpt-image-2` and returns a native sticker in the same configured group or direct chat. Requires an OpenAI API key; each accepted image request is a paid API attempt. Default: medium quality and at most 20 attempts per UTC day across all chats. See [image sticker setup](docs/image-stickers.md). Ordinary conversation is ignored.
+- Commands accept plain text (case-insensitive command names, original prompt casing retained, surrounding spaces allowed), including disappearing text messages. Unconfigured groups and the bot's own messages are ignored; `/status` is group-only. Status has a one-minute group cooldown; fixed and AI stickers each have an independent one-minute cooldown per chat. Each handler allows only one request pending or running at a time; extra requests are silently ignored. History, messages older than five minutes, and messages predating the current connection are ignored. Duplicate requests are suppressed, acceptance survives restart, and uncertain replies are never automatically retried. Image edits run in the background so price checks and health heartbeats continue.
 
 The original proposal in [docs/brief.md](docs/brief.md) is historical. The behavior above incorporates the user's later changes: 18:00, a 6,500 USD Medallion threshold and hourly repeat alerts.
 
@@ -40,7 +41,7 @@ Sources: [Magic Eden stats API](https://docs.magiceden.io/reference/get_collecti
 Use Node.js 24 LTS (22.23.2+ also tested). Node's built-in SQLite avoids a separate database dependency. Node 22 prints an experimental SQLite warning.
 
 ```sh
-npm ci --omit=optional
+npm ci --include=optional
 cp config.example.json config.json
 cp .env.example .env
 npm run verify

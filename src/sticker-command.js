@@ -6,9 +6,9 @@ import { isStickerChat, loadSticker, validateSticker } from './sticker.js';
 // before sending and no replay after restart, reconnect or uncertain delivery.
 export class StickerCommand {
   constructor({ config, store, whatsapp, health, now = Date.now,
-    getSticker = loadSticker, log = () => {} }) {
-    Object.assign(this, { config, store, whatsapp, health, now, getSticker, log });
-    this.stateKey = `sticker-command:${config.groupId}`;
+    getSticker = loadSticker, log = () => {}, statePrefix = 'sticker-command' }) {
+    Object.assign(this, { config, store, whatsapp, health, now, getSticker, log, statePrefix });
+    this.stateKey = `${statePrefix}:${config.groupId}`;
   }
   request(id, message) {
     const chatId = message?.key?.remoteJid;
@@ -16,7 +16,7 @@ export class StickerCommand {
         || !isStickerChat(chatId, this.config.groupId) || message.key.fromMe
         || !this.whatsapp.connected || this.pending || this.inFlight) return false;
     const now = this.now();
-    const stateKey = `sticker-command:${chatId}`;
+    const stateKey = `${this.statePrefix}:${chatId}`;
     const state = this.store.get(stateKey, { recent: [] });
     // Intake tolerates 60 seconds of sender clock skew; a future-dated request
     // can remain admissible for six minutes after its first acceptance.

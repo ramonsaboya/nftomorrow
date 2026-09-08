@@ -1,5 +1,7 @@
 # Native WhatsApp sticker prototype
 
+This document describes the original fixed `/sticker-test` feature. For prompted edits of the separate default photo, see [GPT Image 2 stickers](image-stickers.md).
+
 Send `/sticker-test` from another WhatsApp account in the configured NFTomorrow group **or directly in a one-to-one chat with the bot** while the deployed service is connected. The reply stays in the originating chat, including WhatsApp private-address (LID) chats. The bot replies to that command with the fixed robot DJ sticker. Tap or long-press the received sticker and use WhatsApp's favourites/save action, then confirm it appears in your sticker picker. Labels vary between clients; actual receipt and saving need manual acceptance.
 
 Allow one minute between sticker requests in the same chat. `/status` remains group-only with its own cooldown. Both commands ignore history, stale messages, other groups, broadcasts, captions, the bot's own messages and unsupported command arguments. Sticker cooldown and duplicate records are separate per chat, with only one sticker request pending or running across all chats. Restart/reconnect never replays pending sticker requests; uncertain sends are recorded without automatic retry. The existing hourly checks and alerts, daily summary, session lock, reconnect and shutdown paths remain in use.
@@ -28,7 +30,7 @@ dwebp assets/stickers/sticker-test.webp -o /tmp/nftomorrow-sticker-preview.png
 From this feature checkout using Node 24, install only the existing locked dependencies and run:
 
 ```sh
-npm ci --omit=optional
+npm ci --include=optional
 npm run verify
 ```
 
