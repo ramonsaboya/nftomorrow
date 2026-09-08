@@ -48,6 +48,20 @@ To roll back, stop that same service, verify its process is gone, move the candi
 
 The live activation evidence and exact retained release path are recorded in [validation](validation.md). A service connection or send acknowledgement does not establish phone receipt or saving to favourites.
 
+For the release activated on 8 September, the administrator can execute this exact rollback on the server:
+
+```sh
+set -eu
+test -d /opt/nftomorrow-before-sticker-a6419df9
+test ! -e /opt/nftomorrow-sticker-disabled-a6419df9
+systemctl stop nftomorrow
+test "$(systemctl show nftomorrow -p MainPID --value)" = 0
+mv /opt/nftomorrow /opt/nftomorrow-sticker-disabled-a6419df9
+mv /opt/nftomorrow-before-sticker-a6419df9 /opt/nftomorrow
+systemctl start nftomorrow
+systemctl status nftomorrow --no-pager
+```
+
 ## Cleanup review
 
 The only new runtime feature is fixed sticker transport and its small command handler. No dependencies, image-generation subsystem, schema migration, pairing changes, temporary verifiers or credentials were added. Keep the supplied original and one validated delivery asset; conversion previews remain outside the repository. Existing project artwork is unrelated and retained. The prior code release is intentionally kept on the server for rollback until acceptance.
