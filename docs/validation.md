@@ -19,6 +19,12 @@
 
 - **Diagnostics live at 15:42 UTC / 16:42 BST:** revision `260a5e7dae8fb3e68b36928e522aa9e74d7999ad` passed all **88 tests** and syntax checks on Linux as the service user, then replaced the previous code in the sole systemd service. PID `44056`, zero automatic restarts, approximately 54 MiB observed memory; WhatsApp connected at `15:42:13.120Z` and fresh price checks completed. Prior code remains at `/opt/nftomorrow-before-diagnostics-3bbf2af8`. Temporary staging archive and verification log were removed. No second live image call or WhatsApp message was sent.
 
+## Dobby acknowledgement — 8 September 2026
+
+- Added one quoted `sticker-processing` acknowledgement in the originating group or 1:1 chat, after request/configuration/budget validation and before image generation. Generation starts only after confirmed acknowledgement and a fresh connection check. Duplicate/cooldown/busy requests do not send extra acknowledgements. No periodic updates, dependencies, schema changes or automatic retries were added.
+- All **90 tests** and syntax checks pass locally. Updated flow tests cover one acknowledgement in group and direct chats, preflight rejections, duplicate suppression and failure references; new tests verify that uncertain acknowledgement or disconnect/shutdown during it prevents paid generation and budget reservation.
+- Parallel read-only investigation of `C15EBE86` found HTTP 500 / `server_error` at `2026-09-08T16:45:06.318Z`, after 88,753 ms. OpenAI request ID `req_3adf03682c614f578d1afee6cad41f46`. This is consistent with the ongoing [OpenAI image-generation incident](https://status.openai.com/incidents/01M20PYYYGRT9303VHAPA7YNT2); the incident does not establish the root cause of an individual request. No paid diagnostic request or WhatsApp message was sent during this work.
+
 ## Native sticker prototype — 8 September 2026
 
 - Local Node 24.20.0: `npm run verify` passes syntax checks and all **62 tests**. The locked dependencies are unchanged; installation audit reports zero vulnerabilities.

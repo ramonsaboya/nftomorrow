@@ -6,6 +6,8 @@ In the configured NFTomorrow group or a one-to-one chat with the bot, send:
 /sticker make him a DJ wearing headphones
 ```
 
+After validation and the daily-limit check, Dobby immediately replies once in the same chat: “Dobby’s on it 🪄 I’m making your sticker and will send it here when it’s ready. It may take a couple of minutes.” The acknowledgement quotes the command. There are no repeating progress messages. If that acknowledgement cannot be confirmed, or the connection changes while sending it, no paid image request starts.
+
 Each accepted request uploads the same original [default reference photo](../assets/stickers/default-reference.png) and the user's prompt to `gpt-image-2`. It asks for an isolated sticker with a transparent background and white outline, preserves the person's recognizable appearance, and applies the requested edit. Requests start from the source photo, not a previous result. No mask is required for whole-image prompted edits. Identity fidelity and the requested appearance still need real-output acceptance.
 
 The returned PNG is decoded, checked for genuine transparency, fitted to 512 × 512, compressed to WebP at or below 100,000 bytes, decoded again, and sent as a native quoted sticker in the originating chat. Generated artwork remains in memory and is discarded after the job; the source photo remains in the repository. The fixed robot `/sticker-test` remains available. The deployed status behavior is preserved: mention Dobby followed by `status` in the group, or send `/status` privately.

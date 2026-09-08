@@ -33,7 +33,7 @@ export class ImageStickerCommand extends StickerCommand {
       && this.now() - request.at <= 300_000;
   }
   async deliver(request, kind, send, data = {}) {
-    if (!this.available(request)) return;
+    if (!this.available(request)) return false;
     const id = messageId();
     this.store.reserve(id, { kind, chatId: request.chatId, ...data }, this.now());
     try {
@@ -43,6 +43,7 @@ export class ImageStickerCommand extends StickerCommand {
         this.store.set('deliveryUncertain', false);
       });
       this.log('message_acknowledged', { kind });
+      return true;
     } catch {
       this.store.transaction(() => {
         this.store.finish(id, 'uncertain', this.now());
@@ -50,6 +51,7 @@ export class ImageStickerCommand extends StickerCommand {
       });
       this.log('delivery_uncertain', { kind });
       await this.health.ping('whatsapp', false);
+      return false;
     }
   }
   async note(request, text) {
@@ -66,13 +68,22 @@ export class ImageStickerCommand extends StickerCommand {
       await this.note(request, 'AI stickers are not configured yet. /sticker-test still works.');
       return;
     }
-    const day = new Date(this.now()).toISOString().slice(0, 10);
+    let day = new Date(this.now()).toISOString().slice(0, 10);
     const budget = this.store.get('image-sticker-budget', {});
-    const used = budget.day === day ? budget.used : 0;
+    let used = budget.day === day ? budget.used : 0;
     if (used >= this.dailyLimit) {
       await this.note(request, 'The daily AI sticker limit has been reached. Please try again tomorrow.');
       return;
     }
+    const acknowledged = await this.deliver(request, 'sticker-processing',
+      (id) => this.whatsapp.replyText(id,
+        'Dobby’s on it 🪄 I’m making your sticker and will send it here when it’s ready. It may take a couple of minutes.',
+        request.message));
+    if (!acknowledged || !this.available(request)) return;
+    // The acknowledgement can cross midnight; reserve against the generation day.
+    day = new Date(this.now()).toISOString().slice(0, 10);
+    const currentBudget = this.store.get('image-sticker-budget', {});
+    used = currentBudget.day === day ? currentBudget.used : 0;
     const jobId = `image-${messageId()}`;
     this.store.transaction(() => {
       this.store.set('image-sticker-budget', { day, used: used + 1 });

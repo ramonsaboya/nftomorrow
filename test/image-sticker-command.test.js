@@ -14,7 +14,7 @@ const incoming = (id = 'request', chat = '123@g.us') => ({ key: { id, remoteJid:
   message: { conversation: '/sticker make him a DJ' } });
 function harness(overrides = {}) {
   const store = new Store(':memory:');
-  const sends = [], notices = [], logs = [];
+  const sends = [], notices = [], acknowledgements = [], logs = [];
   let now = Date.parse('2026-09-08T12:00:00Z'), calls = 0;
   const controller = new AbortController();
   const config = { groupId: '123@g.us', displayCurrency: 'USD', dailySummaryTime: '18:00',
@@ -24,7 +24,10 @@ function harness(overrides = {}) {
       assert.equal(store.deliveries().find((d) => d.id === id).status, 'attempting');
       sends.push({ id, buffer, quote });
     },
-    async replyText(id, text, quote) { notices.push({ id, text, quote }); },
+    async replyText(id, text, quote) {
+      const row = store.deliveries().find((d) => d.id === id);
+      (row.data.kind === 'sticker-processing' ? acknowledgements : notices).push({ id, text, quote });
+    },
     async send() {} };
   const dependencies = { store, config, whatsapp, apiKey: 'test', quality: 'medium', dailyLimit: 20,
     signal: controller.signal, now: () => now, health: { async ping() {} },
@@ -37,7 +40,7 @@ function harness(overrides = {}) {
       assert.equal(args.prompt, 'Make him a DJ');
       return { sticker, usage: { total_tokens: 50 } };
     }, ...overrides };
-  return { store, config, whatsapp, dependencies, controller, sends, notices, logs,
+  return { store, config, whatsapp, dependencies, controller, sends, notices, acknowledgements, logs,
     command: new ImageStickerCommand(dependencies), calls: () => calls,
     advance: (ms) => { now += ms; } };
 }
@@ -50,9 +53,13 @@ test('image prompts reserve paid work durably, then send a validated quoted stic
     assert.equal(h.calls(), 1); assert.equal(h.sends.length, 1);
     assert.deepEqual(h.sends[0].quote, incoming());
     const rows = h.store.deliveries();
-    assert.equal(rows[0].status, 'generated'); assert.equal(rows[1].status, 'acknowledged');
-    assert.equal(rows[1].data.model, 'gpt-image-2');
-    assert.equal(rows[1].data.generationId, rows[0].id);
+    assert.equal(rows[0].data.kind, 'sticker-processing'); assert.equal(rows[0].status, 'acknowledged');
+    assert.equal(rows[1].status, 'generated'); assert.equal(rows[2].status, 'acknowledged');
+    assert.equal(rows[2].data.model, 'gpt-image-2');
+    assert.equal(rows[2].data.generationId, rows[1].id);
+    assert.equal(h.acknowledgements.length, 1);
+    assert.match(h.acknowledgements[0].text, /Dobby’s on it/);
+    assert.deepEqual(h.acknowledgements[0].quote, incoming());
     assert.doesNotMatch(JSON.stringify(rows), /Make him a DJ|test-key/);
   } finally { h.store.close(); }
 });
@@ -65,6 +72,36 @@ test('empty/oversized prompts and an absent API key get a reply without paid wor
       assert.equal(h.calls(), 0); assert.equal(h.notices.length, 1);
       assert.equal(h.store.get('image-sticker-budget'), null);
       assert.equal(h.sends.length, 0);
+      assert.equal(h.acknowledgements.length, 0);
+    } finally { h.store.close(); }
+  }
+});
+
+test('uncertain acknowledgement is never resent and prevents a paid generation', async () => {
+  const h = harness();
+  try {
+    let attempts = 0;
+    h.whatsapp.replyText = async () => { attempts++; throw new Error('lost acknowledgement'); };
+    h.command.request('request', incoming(), 'Make him a DJ');
+    await h.command.runPending(); await h.command.runPending();
+    assert.equal(attempts, 1); assert.equal(h.calls(), 0);
+    assert.equal(h.store.get('image-sticker-budget'), null);
+    assert.equal(h.store.deliveries().length, 1);
+    assert.equal(h.store.deliveries()[0].status, 'uncertain');
+    assert.equal(h.store.get('deliveryUncertain'), true);
+  } finally { h.store.close(); }
+});
+
+test('disconnect or shutdown during acknowledgement prevents generation and its budget reservation', async () => {
+  for (const reason of ['reconnect', 'shutdown']) {
+    const h = harness();
+    try {
+      h.whatsapp.replyText = async () => {
+        if (reason === 'reconnect') h.whatsapp.generation++;
+        else h.controller.abort();
+      };
+      h.command.request('request', incoming(), 'Make him a DJ'); await h.command.runPending();
+      assert.equal(h.calls(), 0); assert.equal(h.store.get('image-sticker-budget'), null);
     } finally { h.store.close(); }
   }
 });
@@ -80,6 +117,7 @@ test('duplicate requests and a restart cannot repeat a paid call; chat cooldowns
     assert.equal(restarted.request('dm', incoming('dm', '456@lid'), 'Make him a DJ'), true);
     await restarted.runPending(); assert.equal(h.calls(), 2);
     assert.equal(h.sends[1].quote.key.remoteJid, '456@lid');
+    assert.deepEqual(h.acknowledgements.map((a) => a.quote.key.remoteJid), ['123@g.us', '456@lid']);
   } finally { h.store.close(); }
 });
 
@@ -90,6 +128,7 @@ test('daily paid-attempt limit is shared across chats, persists across handlers 
     const restarted = new ImageStickerCommand(h.dependencies);
     restarted.request('dm', incoming('dm', '456@lid'), 'Make him a DJ'); await restarted.runPending();
     assert.equal(h.calls(), 1); assert.match(h.notices[0].text, /daily AI sticker limit/);
+    assert.equal(h.acknowledgements.length, 1);
     h.advance(86_400_000);
     restarted.generate = async () => ({ sticker, usage: {} });
     restarted.request('tomorrow', incoming('tomorrow'), 'Make him a DJ'); await restarted.runPending();
@@ -100,8 +139,9 @@ test('daily paid-attempt limit is shared across chats, persists across handlers 
 test('slow image generation bounds work while monitor polls continue independently', async () => {
   const h = harness();
   try {
-    let complete;
-    h.command.generate = () => new Promise((resolve) => { complete = resolve; });
+    let complete, began;
+    const started = new Promise((resolve) => { began = resolve; });
+    h.command.generate = () => new Promise((resolve) => { complete = resolve; began(); });
     const monitor = new Monitor({ ...h.dependencies, async getSnapshot() {
       const now = h.dependencies.now();
       return { observedAt: now, lamports: { ...Object.fromEntries(COLLECTIONS.map(({ id }) => [id, 1e9])), medallion: 3e9 },
@@ -111,6 +151,8 @@ test('slow image generation bounds work while monitor polls continue independent
     const first = h.command.runPending();
     assert.equal(h.command.request('dm', incoming('dm', '456@lid'), 'Make him a DJ'), false);
     const second = h.command.runPending();
+    await started;
+    assert.equal(h.acknowledgements.length, 1);
     await monitor.poll();
     assert.equal(h.store.deliveries().at(-1).data.kind, 'alert');
     complete({ sticker, usage: {} }); await Promise.all([first, second]);
@@ -126,7 +168,7 @@ test('generation failure is charged against the cap, sanitized and never auto-re
     h.command.request('request', incoming(), 'Make him a DJ'); await h.command.runPending();
     await h.command.runPending();
     assert.equal(attempts, 1); assert.equal(h.store.get('image-sticker-budget').used, 1);
-    assert.equal(h.store.deliveries()[0].status, 'uncertain');
+    assert.equal(h.store.deliveries().find((d) => d.data.kind === 'sticker-generation').status, 'uncertain');
     assert.equal(h.notices.length, 1);
     assert.doesNotMatch(JSON.stringify([h.logs, h.notices]), /private key|provider details/);
   } finally { h.store.close(); }
@@ -141,7 +183,7 @@ test('failure references correlate safe diagnostic logs with useful billing noti
     const failure = h.logs.find(([event]) => event === 'sticker_generation_failed')[1];
     assert.equal(failure.status, 400); assert.equal(failure.apiCode, 'billing_hard_limit_reached');
     assert.equal(failure.requestId, 'req_billing'); assert.equal(failure.stage, 'image_edit');
-    assert.equal(failure.generationId, h.store.deliveries()[0].id);
+    assert.equal(failure.generationId, h.store.deliveries().find((d) => d.data.kind === 'sticker-generation').id);
     assert.equal(failure.reference, failure.generationId.slice(-8));
     assert.match(h.notices[0].text, /billing or credit limit/);
     assert.ok(h.notices[0].text.endsWith(failure.reference));
