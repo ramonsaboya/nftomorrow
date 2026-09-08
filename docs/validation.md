@@ -13,9 +13,11 @@
 
 ## Image failure diagnostics — 8 September 2026
 
-- The user reported a failure after activation. The server recorded `sticker_generation_failed` at `15:34:32.466Z`, followed by an acknowledged failure notice at `15:34:32.667Z`. The previous handler discarded all error details, so the cause of that original request is unknown.
+- The user reported a failure after activation. The server recorded `sticker_generation_failed` at `15:34:32.466Z`, followed by an acknowledged failure notice at `15:34:32.667Z`. Its audit duration was 84,637 ms, below the three-minute timeout. The previous handler discarded all error details, so the cause of that original request is unknown.
 - One controlled diagnostic from the server used the existing photo, `gpt-image-2`, medium quality and prompt `Make him look like a pirate`. OpenAI returned HTTP 200 in 71,867 ms; conversion produced a valid transparent 512px WebP of 79,104 bytes. Usage was 1,609 input and 1,756 output tokens. OpenAI request ID: `req_bd9e5c8ec7294cc09341ffc90d934b35`. This was one billable API diagnostic outside the chat attempt counter; no WhatsApp session was opened, no message was sent and no output file was retained. User-visible appearance, delivery and saving remain unverified.
 - Added bounded, sanitized API diagnostics, failure-stage/timing/generation references and distinct user notices. Provider messages, raw bodies, prompts and secrets are excluded from logs. No dependency, schema, artwork or retry-policy changes. All **88 tests** and syntax checks pass locally, including new tests for billing/reference correlation, redaction, oversized/non-JSON errors, timeout/access notices and conversion errors.
+
+- **Diagnostics live at 15:42 UTC / 16:42 BST:** revision `260a5e7dae8fb3e68b36928e522aa9e74d7999ad` passed all **88 tests** and syntax checks on Linux as the service user, then replaced the previous code in the sole systemd service. PID `44056`, zero automatic restarts, approximately 54 MiB observed memory; WhatsApp connected at `15:42:13.120Z` and fresh price checks completed. Prior code remains at `/opt/nftomorrow-before-diagnostics-3bbf2af8`. Temporary staging archive and verification log were removed. No second live image call or WhatsApp message was sent.
 
 ## Native sticker prototype — 8 September 2026
 
