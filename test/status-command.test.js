@@ -15,6 +15,7 @@ function harness() {
     assert.equal(store.deliveries().at(-1).status, 'attempting');
     sends.push({ id, text });
   } };
+  whatsapp.replyStatus = async (id, text, chatId) => { await whatsapp.send(id, text); sends.at(-1).chatId = chatId; };
   const dependencies = { store, config, whatsapp, now: () => now,
     health: { async ping(...args) { pings.push(args); } },
     async getSnapshot() {
@@ -133,5 +134,15 @@ test('uncertain delivery is recorded and never automatically retried', async () 
     assert.equal(h.command.request('one'), false);
     await h.command.runPending();
     assert.equal(h.store.deliveries().length, 1);
+  } finally { h.store.close(); }
+});
+
+test('private status replies stay in the requesting chat', async () => {
+  const h = harness();
+  try {
+    h.command.request('private', '789@lid');
+    await h.command.runPending();
+    assert.equal(h.sends[0].chatId, '789@lid');
+    assert.equal(h.store.deliveries()[0].data.chatId, '789@lid');
   } finally { h.store.close(); }
 });

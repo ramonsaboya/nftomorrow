@@ -28,6 +28,7 @@ function harness({ path = ':memory:', start = START } = {}) {
   const config = { groupId: '123@g.us', displayCurrency: 'USD', dailySummaryTime: '18:00',
     thresholds: [{ target: 'medallion', currency: 'USD', below: 6500 }] };
   const whatsapp = { connected: true, generation: 1,
+    async replyStatus(id, text) { return this.send(id, text); },
     async sendSticker(id, sticker, quoted) {
       const audit = store.deliveries().find((delivery) => delivery.id === id);
       assert.equal(audit?.status, 'attempting', 'reserve delivery before any media send');
@@ -376,7 +377,7 @@ test('one queued or loading request bounds work globally across group and direct
   } finally { h.store.close(); }
 });
 
-test('socket events route group and direct commands to quoted native stickers while status stays group-only', async () => {
+test('socket events route group and direct commands to quoted native stickers and private status replies stay private', async () => {
   const h = harness();
   const sent = [], accepted = [];
   let stickerCommand, statusCommand;
@@ -388,7 +389,7 @@ test('socket events route group and direct commands to quoted native stickers wh
   const whatsapp = new WhatsApp({ store: h.store, groupId: h.config.groupId, now: h.now,
     onQr() {}, makeSocket: () => socket,
     onCommand: (id, command, message) => {
-      if (command === '/status') statusCommand.request(id);
+      if (command === '/status') statusCommand.request(id, message.key.remoteJid);
       else if (command === '/sticker-test') accepted.push({ id, accepted: stickerCommand.request(id, message) });
     } });
   stickerCommand = new StickerCommand({ ...h.dependencies, whatsapp });
@@ -409,7 +410,7 @@ test('socket events route group and direct commands to quoted native stickers wh
       message('caption', { message: { imageMessage: { caption: '/sticker-test' } } }),
       message('extra', { message: { conversation: '/sticker-test please' } }),
       request, request,
-      message('status', { message: { conversation: '/status' } }),
+      message('status', { key: { id: 'status', remoteJid: '789@lid' }, message: { conversation: '/status' } }),
     ]));
     emit([message('history')], 'append');
     await stickerCommand.runPending();
@@ -445,12 +446,14 @@ test('socket events route group and direct commands to quoted native stickers wh
       assert.strictEqual(sent.at(-1).options.quoted, direct);
       assert.deepEqual(sent.at(-1).content, { sticker: fixture, mimetype: 'image/webp' });
       assert.equal(h.store.deliveries().at(-1).data.chatId, chatId);
+      h.advance(61_000);
       emit([message(`status-${chatId}`, { key: { id: `status-${chatId}`, remoteJid: chatId },
         message: { conversation: '/status' } })]);
       await statusCommand.runPending();
     }
-    assert.equal(sent.length, 5);
-    assert.equal(h.fetches(), 1, 'direct /status commands never reach the status handler');
+    assert.equal(sent.at(-1).group, '1234567890@lid');
+    assert.equal(sent.length, 7);
+    assert.equal(h.fetches(), 3, 'each private status request fetches current prices');
   } finally { await whatsapp.stop(); h.store.close(); }
 });
 

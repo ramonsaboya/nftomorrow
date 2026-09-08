@@ -34,7 +34,7 @@ try {
   let statusCommand, stickerCommand;
   whatsapp = new WhatsApp({ store, groupId: config.groupId, log,
     onCommand: (id, command, message) => {
-      if (command === '/status') statusCommand.request(id);
+      if (command === '/status') statusCommand.request(id, message.key.remoteJid);
       else if (command === '/sticker-test') stickerCommand.request(id, message);
     },
     onFresh: () => { forceCheck = true; },
