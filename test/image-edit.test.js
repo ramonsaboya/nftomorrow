@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import sharp from 'sharp';
-import { editReference, REFERENCE_URL } from '../src/image-edit.js';
+import { editReference, imageErrorDetails, REFERENCE_URL } from '../src/image-edit.js';
 import { makeGeneratedSticker, validateGeneratedSticker } from '../src/generated-sticker.js';
 import { loadConfig } from '../src/config.js';
 
@@ -131,4 +131,47 @@ test('image configuration has explicit defaults and validates quality and daily 
     { apiKey: 'test', quality: 'high', dailyLimit: 5 });
   for (const changes of [{ OPENAI_IMAGE_QUALITY: 'invalid' }, { STICKER_DAILY_LIMIT: '0' },
     { STICKER_DAILY_LIMIT: 'NaN' }, { STICKER_DAILY_LIMIT: '1.5' }]) assert.throws(() => loadConfig({ ...env, ...changes }));
+});
+
+test('API errors retain support identifiers and billing codes without provider messages or unknown fields', async () => {
+  await assert.rejects(editReference({ prompt: 'private prompt', apiKey: 'test', readReference: async () => png,
+    fetchImpl: async () => Response.json({ error: { code: 'billing_hard_limit_reached',
+      type: 'invalid_request_error', param: null, message: 'private prompt and sk-secret', secret: 'omit' } },
+    { status: 400, headers: { 'x-request-id': 'req_123abc' } }) }), (error) => {
+    assert.deepEqual(imageErrorDetails(error), { code: 'api_rejected', status: 400, requestId: 'req_123abc',
+      apiCode: 'billing_hard_limit_reached', apiType: 'invalid_request_error' });
+    assert.doesNotMatch(JSON.stringify(error), /private prompt|sk-secret|omit/);
+    return true;
+  });
+  await assert.rejects(editReference({ prompt: 'Edit', apiKey: 'test', readReference: async () => png,
+    fetchImpl: async () => Response.json({ error: { code: 'sk-private', type: 'private prompt', param: 'secret' } },
+      { status: 403, headers: { 'x-request-id': 'sk-private' } }) }), (error) => {
+    assert.deepEqual(imageErrorDetails(error), { code: 'api_rejected', status: 403 }); return true;
+  });
+});
+
+test('oversized and non-JSON API errors preserve HTTP status and remain bounded without retries', async () => {
+  for (const body of ['private upstream HTML', 'x'.repeat(16 * 1024 + 1)]) {
+    let cancelled = false, calls = 0;
+    await assert.rejects(editReference({ prompt: 'Edit', apiKey: 'test', readReference: async () => png,
+      fetchImpl: async () => { calls++; return new Response(new ReadableStream({
+        start(controller) { controller.enqueue(Buffer.from(body)); if (body.length < 16384) controller.close(); },
+        cancel() { cancelled = true; },
+      }), { status: 503, headers: { 'x-request-id': 'req_upstream' } }); } }), (error) => {
+      assert.deepEqual(imageErrorDetails(error), { code: 'api_rejected', status: 503, requestId: 'req_upstream' });
+      return true;
+    });
+    assert.equal(calls, 1);
+    if (body.length > 16384) assert.equal(cancelled, true);
+  }
+});
+
+test('failed conversion is distinguished from API rejection and preserves the successful request ID', async () => {
+  await assert.rejects(editReference({ prompt: 'Edit', apiKey: 'test', readReference: async () => png,
+    fetchImpl: async () => Response.json({ data: [{ b64_json: png.toString('base64') }] },
+      { headers: { 'x-request-id': 'req_conversion' } }),
+    convert: async () => { throw new Error('private native error'); } }), (error) => {
+    assert.deepEqual(imageErrorDetails(error), { code: 'conversion_failed', status: 200, requestId: 'req_conversion' });
+    assert.doesNotMatch(JSON.stringify(error), /private native/); return true;
+  });
 });

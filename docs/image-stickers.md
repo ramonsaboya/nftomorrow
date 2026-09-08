@@ -53,7 +53,21 @@ Runtime conversion uses pinned Sharp 0.35.4, with one native worker and its cach
 
 Run `npm run verify` in this feature checkout. Tests substitute the OpenAI HTTP response and WhatsApp socket; they exercise real multipart request construction, image decoding/compression and command flows without paid API calls or using the live paired session. Linux staging tests must pass before switching the existing service.
 
-Application revision `3bbf2af84fefc43b0e69099790b24ecf02dc1109` is staged at `/opt/nftomorrow-image-3bbf2af8` and passed all 83 tests on Linux. Live activation is pending the API key and a successful first authenticated edit. Before activation, recheck that the live revision is still `e2fd3b248abd071dbb902cd190574da7cceedc16`; if it changed, preserve that update in the feature first. Retain the current release for code-only rollback; keep `/var/lib/nftomorrow` untouched. After activation, send the example command from a non-bot account, check the edit resembles the default photo with the requested change, confirm it is a native sticker in the same chat, and save it to favourites. Allow up to three minutes and avoid repeating uncertain requests.
+Application revision `3bbf2af84fefc43b0e69099790b24ecf02dc1109` is live at `/opt/nftomorrow` as of 15:31 UTC / 16:31 BST on 8 September 2026, after all 83 tests passed on Linux. The supplied API key was installed in the root-only environment file and authenticated access to the `gpt-image-2` model was verified without an image-generation request. The same systemd service restarted as PID `43073` with zero automatic restarts, and WhatsApp connected at `15:31:41.180Z`. Code-only rollback is retained at `/opt/nftomorrow-before-image-e2fd3b24`; `/var/lib/nftomorrow` remains untouched. Before future release changes, recheck the live revision and preserve concurrent updates.
+
+A controlled authenticated pirate edit succeeded in about 72 seconds and converted to a valid 79,104-byte sticker; it was not sent to WhatsApp. Delivery, appearance and save acceptance remain manual steps: send the example command from a non-bot account, check the edit resembles the default photo with the requested change, confirm it is a native sticker in the same chat, and save it to favourites. That diagnostic verifies API generation and transparent conversion for one prompt; it does not establish why the earlier user request failed or verify recipient-visible output quality. Allow up to three minutes and avoid repeating uncertain requests.
+
+## Debugging a failed sticker
+
+Failures now include a short `Reference` in the WhatsApp reply. On the server, inspect the matching structured event:
+
+```sh
+journalctl -u nftomorrow --since '15 minutes ago' -o cat --no-pager
+```
+
+Find `sticker_generation_failed` and match `reference`. The event records the generation ID, elapsed time, stage, local error code, HTTP status, allowlisted provider error code/type/parameter and OpenAI request ID when available. `image_edit` covers source loading, the API request and conversion; `conversion_failed` specifically means the API returned an image that could not become a valid sticker. `sticker_validation` means the final output failed validation. `delivery_uncertain` is a separate WhatsApp send problem and never regenerates artwork.
+
+Provider messages, response bodies, raw prompts, images and keys are omitted. API error bodies are read with a 16 KiB cap. Billing/access/rate-limit/timeout/conversion failures get distinct user notices; only an explicit moderation code suggests changing the prompt. There are no automatic paid retries. Use the OpenAI request ID for provider support. A generic historical failure from before this diagnostic change cannot be reconstructed because its original details were discarded.
 
 ## Cleanup review
 

@@ -1,9 +1,20 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { StickerCommand } from './sticker-command.js';
-import { editReference, IMAGE_MODEL, MAX_PROMPT_LENGTH } from './image-edit.js';
+import { editReference, imageErrorDetails, IMAGE_MODEL, MAX_PROMPT_LENGTH } from './image-edit.js';
 import { validateGeneratedSticker } from './generated-sticker.js';
 
 const messageId = () => `3EB0${randomBytes(14).toString('hex').toUpperCase()}`;
+
+function failureNotice(error) {
+  if (['billing_hard_limit_reached', 'insufficient_quota'].includes(error.apiCode)
+      || error.apiType === 'insufficient_quota') return 'AI stickers are unavailable because the OpenAI account has reached its billing or credit limit. The bot owner needs to check API billing.';
+  if ([401, 403].includes(error.status)) return 'AI stickers are unavailable because OpenAI rejected the bot\'s access. The bot owner needs to check the API key and model permissions.';
+  if (['content_policy_violation', 'moderation_blocked'].includes(error.apiCode)) return 'OpenAI could not accept that image request. Please use a different prompt.';
+  if (error.code === 'rate_limited') return 'OpenAI is receiving too many image requests. Please try again later.';
+  if (error.code === 'timeout') return 'Image creation took too long to respond. It may still have been processed, so please wait before trying again.';
+  if (error.code === 'conversion_failed') return 'The image was created, but I could not turn it into a valid sticker. The bot owner can check the error reference.';
+  return 'I could not create that sticker. The bot owner can check the error reference before you try again.';
+}
 
 export class ImageStickerCommand extends StickerCommand {
   constructor({ apiKey = '', quality = 'medium', dailyLimit = 20, signal,
@@ -69,16 +80,22 @@ export class ImageStickerCommand extends StickerCommand {
         promptHash: createHash('sha256').update(request.prompt).digest('hex') }, this.now());
     });
     let result, asset;
+    const startedAt = this.now(), reference = jobId.slice(-8);
+    let stage = 'image_edit';
     try {
       result = await this.generate({ prompt: request.prompt, apiKey: this.apiKey,
         quality: this.quality, signal: this.signal });
+      stage = 'sticker_validation';
       asset = await validateGeneratedSticker(result.sticker);
       this.store.finish(jobId, 'generated', this.now());
-      this.log('sticker_generated', { model: IMAGE_MODEL, bytes: asset.bytes, usage: result.usage });
-    } catch {
+      this.log('sticker_generated', { model: IMAGE_MODEL, generationId: jobId,
+        elapsedMs: this.now() - startedAt, bytes: asset.bytes, usage: result.usage });
+    } catch (error) {
       this.store.finish(jobId, 'uncertain', this.now());
-      this.log('sticker_generation_failed');
-      await this.note(request, 'I could not create that sticker. Please try again later or use a different prompt.');
+      const details = imageErrorDetails(error);
+      this.log('sticker_generation_failed', { generationId: jobId, reference, stage,
+        elapsedMs: this.now() - startedAt, ...details });
+      await this.note(request, `${failureNotice(details)} Reference: ${reference}`);
       return;
     }
     await this.deliver(request, 'sticker-image',

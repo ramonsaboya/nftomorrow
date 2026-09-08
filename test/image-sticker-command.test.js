@@ -7,6 +7,7 @@ import { ImageStickerCommand } from '../src/image-sticker-command.js';
 import { WhatsApp } from '../src/whatsapp.js';
 import { Monitor } from '../src/monitor.js';
 import { COLLECTIONS } from '../src/collections.js';
+import { ImageEditError } from '../src/image-edit.js';
 
 const sticker = await readFile(new URL('../assets/stickers/sticker-test.webp', import.meta.url));
 const incoming = (id = 'request', chat = '123@g.us') => ({ key: { id, remoteJid: chat },
@@ -129,6 +130,36 @@ test('generation failure is charged against the cap, sanitized and never auto-re
     assert.equal(h.notices.length, 1);
     assert.doesNotMatch(JSON.stringify([h.logs, h.notices]), /private key|provider details/);
   } finally { h.store.close(); }
+});
+
+test('failure references correlate safe diagnostic logs with useful billing notices', async () => {
+  const h = harness({ generate: async () => { throw new ImageEditError('api_rejected', {
+    status: 400, requestId: 'req_billing', apiCode: 'billing_hard_limit_reached', message: 'sk-private prompt',
+  }); } });
+  try {
+    h.command.request('request', incoming(), 'Make him a DJ'); await h.command.runPending();
+    const failure = h.logs.find(([event]) => event === 'sticker_generation_failed')[1];
+    assert.equal(failure.status, 400); assert.equal(failure.apiCode, 'billing_hard_limit_reached');
+    assert.equal(failure.requestId, 'req_billing'); assert.equal(failure.stage, 'image_edit');
+    assert.equal(failure.generationId, h.store.deliveries()[0].id);
+    assert.equal(failure.reference, failure.generationId.slice(-8));
+    assert.match(h.notices[0].text, /billing or credit limit/);
+    assert.ok(h.notices[0].text.endsWith(failure.reference));
+    assert.doesNotMatch(JSON.stringify([h.logs, h.notices]), /sk-private|Make him a DJ/);
+  } finally { h.store.close(); }
+});
+
+test('timeout, access and conversion failures produce distinct notices without encouraging prompt changes', async () => {
+  for (const [error, expected] of [[new DOMException('secret', 'TimeoutError'), /took too long/],
+    [new ImageEditError('api_rejected', { status: 403 }), /check the API key/],
+    [new ImageEditError('conversion_failed', { status: 200 }), /could not turn it into a valid sticker/]]) {
+    const h = harness({ generate: async () => { throw error; } });
+    try {
+      h.command.request('request', incoming(), 'Make him a DJ'); await h.command.runPending();
+      assert.match(h.notices[0].text, expected);
+      assert.doesNotMatch(h.notices[0].text, /different prompt|secret/);
+    } finally { h.store.close(); }
+  }
 });
 
 test('disconnect, reconnect, expiry and shutdown suppress late image replies', async () => {
