@@ -25,6 +25,8 @@
 - All **90 tests** and syntax checks pass locally. Updated flow tests cover one acknowledgement in group and direct chats, preflight rejections, duplicate suppression and failure references; new tests verify that uncertain acknowledgement or disconnect/shutdown during it prevents paid generation and budget reservation.
 - Parallel read-only investigation of `C15EBE86` found HTTP 500 / `server_error` at `2026-09-08T16:45:06.318Z`, after 88,753 ms. OpenAI request ID `req_3adf03682c614f578d1afee6cad41f46`. This is consistent with the ongoing [OpenAI image-generation incident](https://status.openai.com/incidents/01M20PYYYGRT9303VHAPA7YNT2); the incident does not establish the root cause of an individual request. No paid diagnostic request or WhatsApp message was sent during this work.
 
+- **Acknowledgement live at 16:48 UTC / 17:48 BST:** revision `3e7b216232b4b78d7920fbc924e464e62cdf946e` passed all 90 tests on Linux as the service user. No image job was active at preflight. The sole service restarted as PID `45373`, active with zero automatic restarts; WhatsApp connected at `16:48:53.895Z`, and fresh price checks completed. Rollback code is `/opt/nftomorrow-before-ack-260a5e7`. Temporary archive and verification logs were removed; the paired session/state was preserved. Receipt of the new acknowledgement on a phone remains manual acceptance.
+
 ## Native sticker prototype — 8 September 2026
 
 - Local Node 24.20.0: `npm run verify` passes syntax checks and all **62 tests**. The locked dependencies are unchanged; installation audit reports zero vulnerabilities.
