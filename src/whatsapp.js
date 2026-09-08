@@ -166,7 +166,9 @@ export class WhatsApp {
     return this.#reply(id, { sticker: stickerBuffer, mimetype: 'image/webp' }, quotedMessage);
   }
   async sendGeneratedSticker(id, stickerBuffer, quotedMessage) {
+    const generation = this.generation;
     await validateGeneratedSticker(stickerBuffer);
+    if (generation !== this.generation) throw new Error('WhatsApp connection changed while validating sticker');
     return this.#reply(id, { sticker: stickerBuffer, mimetype: 'image/webp' }, quotedMessage);
   }
   async replyText(id, text, quotedMessage) {

@@ -189,5 +189,10 @@ test('real command intake preserves prompts and replies to their group/DM while 
     await wa.send('price', 'Prices'); assert.equal(sends.at(-1).chat, '123@g.us');
     await assert.rejects(wa.replyText('invalid', 'Never send', incoming('other', '999@g.us')));
     await assert.rejects(wa.sendGeneratedSticker('invalid', Buffer.from('bad'), commands[0][2]));
+    const before = sends.length;
+    const interrupted = wa.sendGeneratedSticker('reconnected', sticker, commands[0][2]);
+    wa.generation++;
+    await assert.rejects(interrupted, /connection changed/);
+    assert.equal(sends.length, before);
   } finally { await wa.stop(); store.close(); }
 });
