@@ -1,12 +1,13 @@
-import makeWASocket, { Browsers, DisconnectReason } from '@whiskeysockets/baileys';
+import makeWASocket, { Browsers, DisconnectReason, normalizeMessageContent } from '@whiskeysockets/baileys';
 import pino from 'pino';
 import { sqliteAuth } from './auth.js';
 import { withTimeout } from './http.js';
 
 export class WhatsApp {
-  constructor({ store, groupId, onFresh = () => {}, onStatus = () => {}, onQr,
+  constructor({ store, groupId, onFresh = () => {}, onStatus = () => {}, onCommand = () => {}, onQr,
+    now = Date.now,
     log = () => {}, makeSocket = makeWASocket, schedule = setTimeout, cancel = clearTimeout }) {
-    Object.assign(this, { store, groupId, onFresh, onStatus, onQr, log, makeSocket, schedule, cancel });
+    Object.assign(this, { store, groupId, onFresh, onStatus, onCommand, onQr, now, log, makeSocket, schedule, cancel });
     this.connected = false;
     this.generation = 0;
     this.attempt = 0;
@@ -44,6 +45,22 @@ export class WhatsApp {
         getMessage: async () => undefined,
       });
       this.socket = socket;
+      let openedAt = Infinity;
+      socket.ev.on('messages.upsert', ({ type, messages }) => {
+        if (type !== 'notify' || this.stopped || !this.connected || generation !== this.generation) return;
+        for (const message of messages) {
+          const { key } = message;
+          const timestamp = Number(message.messageTimestamp) * 1000;
+          if (key?.remoteJid !== this.groupId || key.fromMe || !key.id
+              || !Number.isFinite(timestamp) || timestamp < openedAt
+              || timestamp > this.now() + 60_000 || this.now() - timestamp > 300_000) continue;
+          const content = normalizeMessageContent(message.message);
+          const text = content?.conversation ?? content?.extendedTextMessage?.text;
+          if (typeof text === 'string' && text.trim().toLowerCase() === '/status') {
+            this.onCommand(key.id);
+          }
+        }
+      });
       socket.ev.on('creds.update', () => {
         if (this.stopped || generation !== this.generation) return;
         try { auth.saveCreds(); }
@@ -60,6 +77,7 @@ export class WhatsApp {
           }
         }
         if (update.connection === 'open') {
+          openedAt = Math.floor(this.now() / 1000) * 1000;
           this.connected = true;
           this.attempt = 0;
           this.store.set('whatsappLoggedOut', false);

@@ -1,6 +1,6 @@
 # nftomorrow
 
-Tomorrowland NFT floor prices for one WhatsApp group, using Node.js, Baileys and SQLite. No AI, website, wallet access, purchases, trading or inbound chatbot.
+Tomorrowland NFT floor prices for one WhatsApp group, using Node.js, Baileys and SQLite. Supports a single incoming `/status` command. No AI, website, wallet access, purchases or trading.
 
 ## Behavior
 
@@ -10,6 +10,8 @@ Tomorrowland NFT floor prices for one WhatsApp group, using Node.js, Baileys and
 - Checks can detect a dip up to an hour late and miss short dips. “Immediately” means immediately after a check detects the threshold.
 - Reconnects and restarts fetch current prices; they do not replay queued messages. Already-attempted alerts are not duplicated within the same UTC hour. First installation waits for the next daily slot; after downtime, at most the latest missed daily summary is sent with fresh prices.
 - Persist history, authentication, daily state and delivery bookkeeping. Continue price checks while WhatsApp is disconnected or requires re-pairing.
+- Send `/status` in the configured WhatsApp group for a fresh check of the three NFT floors, Medallion total, exchange rate and check time. Any group member can use it. Replies use the message format below, independently of hourly alerts and the daily summary. Failed price checks return an unavailable message; missing FX still shows SOL prices.
+- `/status` accepts plain text (case-insensitive, surrounding spaces allowed), including disappearing text messages. Other commands, direct messages, other groups and the bot's own messages are ignored. Requests have a one-minute group cooldown and only one request can be pending or running; extra requests are silently ignored. History, messages older than five minutes, and messages predating the current connection are ignored. Duplicate requests are suppressed, acceptance survives restart, and uncertain replies are never automatically retried.
 
 The original proposal in [docs/brief.md](docs/brief.md) is historical. The behavior above incorporates the user's later changes: 18:00, a 6,500 USD Medallion threshold and hourly repeat alerts.
 

@@ -15,6 +15,8 @@ Journald storage is capped at 100 MB and retention at 14 days on this dedicated 
 
 ## Service commands
 
+For current NFT prices, send `/status` from another WhatsApp account in the configured group while the service is connected. It fetches fresh prices and replies in that group. Allow one minute between requests. This is a price command; use the administrator commands below for process health. Commands sent while offline are not replayed after reconnect.
+
 Run through SSH as the server administrator:
 
 ```sh

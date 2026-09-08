@@ -7,6 +7,7 @@ import { acquireLock } from './lock.js';
 import { WhatsApp } from './whatsapp.js';
 import { Health } from './health.js';
 import { Monitor } from './monitor.js';
+import { StatusCommand } from './status-command.js';
 import { finishCommand } from './shutdown.js';
 
 process.umask(0o077);
@@ -29,7 +30,9 @@ try {
   const health = new Health(healthUrls, { log });
   let forceCheck = true;
   const background = new Set();
+  let statusCommand;
   whatsapp = new WhatsApp({ store, groupId: config.groupId, log,
+    onCommand: (id) => { statusCommand.request(id); },
     onFresh: () => { forceCheck = true; },
     onStatus: (status) => {
       log('whatsapp_status', { status });
@@ -42,6 +45,7 @@ try {
     },
   });
   const monitor = new Monitor({ config, store, whatsapp, health, apiKey, log });
+  statusCommand = new StatusCommand({ config, store, whatsapp, health, apiKey, log });
   const missingChecks = ['process', 'prices', 'whatsapp'].filter((name) => !healthUrls[name]);
   if (missingChecks.length) log('email_monitoring_unconfigured', { checks: missingChecks });
   log('monitor_started', { dailySummaryTime: config.dailySummaryTime, timezone: 'Europe/London', polling: 'hourly' });
@@ -60,6 +64,8 @@ try {
       forceCheck = false;
       await monitor.poll();
     }
+    if (stopped) break;
+    await statusCommand.runPending();
     try { await sleep(1000, undefined, { signal: wake.signal }); }
     catch { if (!stopped) throw new Error('Monitor wait failed'); }
   }

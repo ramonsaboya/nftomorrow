@@ -1,5 +1,11 @@
 # Validation record
 
+## On-demand status command — 8 September 2026
+
+- Local syntax checks and all 39 tests pass. New coverage verifies incoming group-only `/status` filtering, disappearing text, own-message/history/stale-message rejection, fresh replies, unchanged automatic scheduling, persistent cooldown/deduplication, bounded concurrent work, unavailable prices/FX, reconnect/expiry cancellation and uncertain-delivery bookkeeping.
+- Incoming events and sends are mocked in these tests. Actual group command delivery and phone notifications require live acceptance after deployment.
+- Cleanup review: no dependencies, schema migrations, temporary runtime helpers or private state were added. The README's former no-inbound-chatbot description now documents the single supported command.
+
 ## Verified locally on 7 September 2026
 
 - Node 22.23.2 on macOS; syntax checks and 32 Node test cases pass, including delivery bookkeeping, QR session restart regressions and bounded CLI shutdown with output flushing.
