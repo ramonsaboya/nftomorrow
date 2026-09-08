@@ -8,6 +8,7 @@ import { WhatsApp } from './whatsapp.js';
 import { Health } from './health.js';
 import { Monitor } from './monitor.js';
 import { StatusCommand } from './status-command.js';
+import { StickerCommand } from './sticker-command.js';
 import { finishCommand } from './shutdown.js';
 
 process.umask(0o077);
@@ -30,9 +31,12 @@ try {
   const health = new Health(healthUrls, { log });
   let forceCheck = true;
   const background = new Set();
-  let statusCommand;
+  let statusCommand, stickerCommand;
   whatsapp = new WhatsApp({ store, groupId: config.groupId, log,
-    onCommand: (id) => { statusCommand.request(id); },
+    onCommand: (id, command, message) => {
+      if (command === '/status') statusCommand.request(id);
+      else if (command === '/sticker-test') stickerCommand.request(id, message);
+    },
     onFresh: () => { forceCheck = true; },
     onStatus: (status) => {
       log('whatsapp_status', { status });
@@ -46,6 +50,7 @@ try {
   });
   const monitor = new Monitor({ config, store, whatsapp, health, apiKey, log });
   statusCommand = new StatusCommand({ config, store, whatsapp, health, apiKey, log });
+  stickerCommand = new StickerCommand({ config, store, whatsapp, health, log });
   const missingChecks = ['process', 'prices', 'whatsapp'].filter((name) => !healthUrls[name]);
   if (missingChecks.length) log('email_monitoring_unconfigured', { checks: missingChecks });
   log('monitor_started', { dailySummaryTime: config.dailySummaryTime, timezone: 'Europe/London', polling: 'hourly' });
@@ -66,6 +71,8 @@ try {
     }
     if (stopped) break;
     await statusCommand.runPending();
+    if (stopped) break;
+    await stickerCommand.runPending();
     try { await sleep(1000, undefined, { signal: wake.signal }); }
     catch { if (!stopped) throw new Error('Monitor wait failed'); }
   }

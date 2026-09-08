@@ -1,5 +1,15 @@
 # Validation record
 
+## Native sticker prototype — 8 September 2026
+
+- Local Node 24.20.0: `npm run verify` passes syntax checks and all **62 tests**. The locked dependencies are unchanged; installation audit reports zero vulnerabilities.
+- Sticker replies work through mocked full command flows in the configured group, phone-number direct chats and WhatsApp LID direct chats. Tests cover actual Baileys sticker protocol generation with simulated uploads, original-message quoting, per-chat persistent cooldown/deduplication, globally bounded work, invalid/stale/history/own-message rejection, missing/corrupt assets, reconnect/expiry cancellation, timeouts and uncertain-send bookkeeping. `/status` remains group-only, and automatic alert/summary regression tests pass.
+- Review identified and fixed a future-clock-skew duplicate window in the new sticker handler. Retention includes the parser's 60-second timestamp tolerance; the replay-after-301-seconds regression now sends only once.
+- Asset validation: original RGBA PNG saved, static transparent WebP encoded to 512 × 512 and 73,460 bytes. `webpinfo -diag` reports no errors; `dwebp` decodes successfully; the final sticker was visually reviewed. Runtime validation pins its verified SHA-256.
+- Live preflight: current server release `dc870316818821b3e3ea51de5f6a36f9c772c5b8` matched all 39 tracked files, local and GitHub main. Exactly one remote systemd process owns the paired session; no local bot process. No private state or credentials were read or copied.
+- Deployment and manual WhatsApp acceptance are separate from these automated checks. Live activation results will be recorded here after staged Linux validation and switching the existing service.
+- Cleanup review: one original plus one delivery asset; no new dependency, schema migration, AI subsystem or temporary runtime verifier. See [prototype instructions](sticker-prototype.md) for testing and code-only rollback.
+
 ## On-demand status command — 8 September 2026
 
 - Local syntax checks and all 39 tests pass. New coverage verifies incoming group-only `/status` filtering, disappearing text, own-message/history/stale-message rejection, fresh replies, unchanged automatic scheduling, persistent cooldown/deduplication, bounded concurrent work, unavailable prices/FX, reconnect/expiry cancellation and uncertain-delivery bookkeeping.

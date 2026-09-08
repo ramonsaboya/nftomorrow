@@ -2,6 +2,7 @@ import makeWASocket, { Browsers, DisconnectReason, normalizeMessageContent } fro
 import pino from 'pino';
 import { sqliteAuth } from './auth.js';
 import { withTimeout } from './http.js';
+import { isStickerChat, validateSticker } from './sticker.js';
 
 export class WhatsApp {
   constructor({ store, groupId, onFresh = () => {}, onStatus = () => {}, onCommand = () => {}, onQr,
@@ -46,18 +47,26 @@ export class WhatsApp {
       });
       this.socket = socket;
       let openedAt = Infinity;
-      socket.ev.on('messages.upsert', ({ type, messages }) => {
-        if (type !== 'notify' || this.stopped || !this.connected || generation !== this.generation) return;
-        for (const message of messages) {
+      socket.ev.on('messages.upsert', (event) => {
+        if (event?.type !== 'notify' || !Array.isArray(event.messages)
+            || this.stopped || !this.connected || generation !== this.generation) return;
+        for (const message of event.messages) {
+          if (!message || typeof message !== 'object') continue;
           const { key } = message;
-          const timestamp = Number(message.messageTimestamp) * 1000;
-          if (key?.remoteJid !== this.groupId || key.fromMe || !key.id
-              || !Number.isFinite(timestamp) || timestamp < openedAt
+          if (!key || typeof key !== 'object' || key.fromMe
+              || typeof key.id !== 'string' || !key.id.trim()) continue;
+          let timestamp, content;
+          try {
+            timestamp = Number(message.messageTimestamp) * 1000;
+            content = normalizeMessageContent(message.message);
+          } catch { continue; }
+          if (!Number.isFinite(timestamp) || timestamp < openedAt
               || timestamp > this.now() + 60_000 || this.now() - timestamp > 300_000) continue;
-          const content = normalizeMessageContent(message.message);
           const text = content?.conversation ?? content?.extendedTextMessage?.text;
-          if (typeof text === 'string' && text.trim().toLowerCase() === '/status') {
-            this.onCommand(key.id);
+          const command = typeof text === 'string' ? text.trim().toLowerCase() : null;
+          if ((command === '/status' && key.remoteJid === this.groupId)
+              || (command === '/sticker-test' && isStickerChat(key.remoteJid, this.groupId))) {
+            this.onCommand(key.id, command, message);
           }
         }
       });
@@ -118,11 +127,27 @@ export class WhatsApp {
     }, delay);
   }
   async send(id, text) {
+    return this.#sendContent(id, { text, linkPreview: null });
+  }
+  async sendSticker(id, stickerBuffer, quotedMessage) {
+    validateSticker(stickerBuffer);
+    const key = quotedMessage?.key;
+    if (!key || key.fromMe || typeof key.id !== 'string' || !key.id.trim()
+        || !isStickerChat(key.remoteJid, this.groupId)) {
+      throw new Error('Invalid quoted sticker command');
+    }
+    return this.#sendContent(id, { sticker: stickerBuffer, mimetype: 'image/webp' },
+      { quoted: quotedMessage });
+  }
+  async #sendContent(id, content, options = {}) {
     if (!this.connected || !this.socket) throw new Error('WhatsApp unavailable');
-    if (!/^\d+(?:-\d+)?@g\.us$/.test(this.groupId ?? '')) throw new Error('Invalid configured group');
-    // There is intentionally no recipient parameter: this is the only send path.
-    const result = await withTimeout(this.socket.sendMessage(this.groupId,
-      { text, linkPreview: null }, { messageId: id }), 30_000);
+    const recipient = content.sticker ? options.quoted?.key?.remoteJid : this.groupId;
+    if (content.sticker) {
+      if (!isStickerChat(recipient, this.groupId)) throw new Error('Invalid sticker reply destination');
+    } else if (!/^\d+(?:-\d+)?@g\.us$/.test(recipient ?? '')) throw new Error('Invalid configured group');
+    // Sticker replies follow their incoming command; text stays in the configured group.
+    const result = await withTimeout(this.socket.sendMessage(recipient,
+      content, { ...options, messageId: id }), 30_000);
     if (result?.key?.id !== id) throw new Error('Missing WhatsApp send acknowledgement');
     return result;
   }

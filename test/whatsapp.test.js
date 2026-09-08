@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import { DisconnectReason } from '@whiskeysockets/baileys';
+import { readFileSync } from 'node:fs';
+import { DisconnectReason, generateWAMessage } from '@whiskeysockets/baileys';
 import { Store } from '../src/store.js';
 import { sqliteAuth } from '../src/auth.js';
 import { WhatsApp } from '../src/whatsapp.js';
@@ -46,20 +47,24 @@ test('temporary outage backs off, reconnects and requests fresh observation', as
   assert.equal(h.wa.connected, true);
   h.wa.stop(); h.store.close();
 });
-test('status accepts only fresh group text commands, including disappearing text', async () => {
+test('accepts only fresh group status and sticker text commands, including disappearing text', async () => {
   let now = 1_800_000_000_000;
   const commands = [];
-  const h = harness({ now: () => now, onCommand: (id) => commands.push(id) });
+  const h = harness({ now: () => now, onCommand: (id, command, message) => commands.push({ id, command, message }) });
   try {
     await h.wa.start();
     const socket = h.sockets[0];
     socket.ev.emit('connection.update', { connection: 'open' });
     const message = (id, changes = {}) => ({ key: { remoteJid: '12345@g.us', id },
       messageTimestamp: now / 1000, message: { conversation: '/status' }, ...changes });
+    const stickerMessage = message('sticker', { message: { conversation: '/sticker-test' } });
     socket.ev.emit('messages.upsert', { type: 'notify', messages: [
       message('plain'),
       message('extended', { message: { extendedTextMessage: { text: ' /STATUS ' } } }),
       message('ephemeral', { message: { ephemeralMessage: { message: { conversation: '/status' } } } }),
+      stickerMessage,
+      message('sticker-extended', { message: { extendedTextMessage: { text: ' /STICKER-TEST ' } } }),
+      message('sticker-ephemeral', { message: { ephemeralMessage: { message: { conversation: '/sticker-test' } } } }),
       message('other', { key: { remoteJid: '999@g.us', id: 'other' } }),
       message('dm', { key: { remoteJid: '123@s.whatsapp.net', id: 'dm' } }),
       message('own', { key: { remoteJid: '12345@g.us', id: 'own', fromMe: true } }),
@@ -69,9 +74,17 @@ test('status accepts only fresh group text commands, including disappearing text
       message('caption', { message: { imageMessage: { caption: '/status' } } }),
       message('quoted', { message: { extendedTextMessage: { text: 'hello', contextInfo: { quotedMessage: { conversation: '/status' } } } } }),
       message('extra', { message: { conversation: '/status please' } }),
+      message('sticker-extra', { message: { conversation: '/sticker-test please' } }),
+      message('sticker-caption', { message: { imageMessage: { caption: '/sticker-test' } } }),
+      message('sticker-other', { key: { remoteJid: '999@g.us', id: 'sticker-other' }, message: { conversation: '/sticker-test' } }),
+      message('sticker-own', { key: { remoteJid: '12345@g.us', id: 'sticker-own', fromMe: true }, message: { conversation: '/sticker-test' } }),
     ] });
     socket.ev.emit('messages.upsert', { type: 'append', messages: [message('history')] });
-    assert.deepEqual(commands, ['plain', 'extended', 'ephemeral']);
+    assert.deepEqual(commands.map(({ id, command }) => [id, command]), [
+      ['plain', '/status'], ['extended', '/status'], ['ephemeral', '/status'],
+      ['sticker', '/sticker-test'], ['sticker-extended', '/sticker-test'], ['sticker-ephemeral', '/sticker-test'],
+    ]);
+    assert.equal(commands[3].message, stickerMessage);
     now += 301_000;
     socket.ev.emit('messages.upsert', { type: 'notify', messages: [message('stale', { messageTimestamp: now / 1000 - 301 })] });
     socket.ev.emit('connection.update', { connection: 'close' });
@@ -81,7 +94,61 @@ test('status accepts only fresh group text commands, including disappearing text
     socket.ev.emit('messages.upsert', { type: 'notify', messages: [message('old-socket')] });
     h.wa.stop();
     h.sockets[1].ev.emit('messages.upsert', { type: 'notify', messages: [message('stopped')] });
-    assert.equal(commands.length, 3);
+    assert.equal(commands.length, 6);
+  } finally { await h.wa.stop(); h.store.close(); }
+});
+test('direct phone and LID chats accept only fresh sticker commands and reject other destinations', async () => {
+  const now = 1_800_000_000_000, commands = [];
+  const h = harness({ now: () => now, onCommand: (id, command, message) => commands.push({ id, command, message }) });
+  try {
+    await h.wa.start();
+    const socket = h.sockets[0];
+    socket.ev.emit('connection.update', { connection: 'open' });
+    const message = (id, remoteJid, changes = {}) => ({ key: { remoteJid, id },
+      messageTimestamp: now / 1000, message: { conversation: '/sticker-test' }, ...changes });
+    const directMessages = [message('phone', '123@s.whatsapp.net'), message('lid', '456@lid', {
+      message: { ephemeralMessage: { message: { extendedTextMessage: { text: ' /STICKER-TEST ' } } } },
+    })];
+    socket.ev.emit('messages.upsert', { type: 'notify', messages: [
+      ...directMessages,
+      ...['123@s.whatsapp.net', '456@lid'].flatMap((jid) => [
+        message('status', jid, { message: { conversation: '/status' } }),
+        message('own', jid, { key: { remoteJid: jid, id: 'own', fromMe: true } }),
+        message('old', jid, { messageTimestamp: now / 1000 - 1 }),
+        message('future', jid, { messageTimestamp: now / 1000 + 61 }),
+        message('no-time', jid, { messageTimestamp: undefined }),
+        message('caption', jid, { message: { imageMessage: { caption: '/sticker-test' } } }),
+      ]),
+      ...['999@g.us', 'status@broadcast', '123@broadcast', '123@newsletter',
+        'invalid@s.whatsapp.net', 'invalid@lid', '', undefined].map((jid) => message('invalid', jid)),
+    ] });
+    socket.ev.emit('messages.upsert', { type: 'append', messages: [message('history', '123@s.whatsapp.net')] });
+    assert.deepEqual(commands, directMessages.map((message) => ({ id: message.key.id,
+      command: '/sticker-test', message })));
+  } finally { await h.wa.stop(); h.store.close(); }
+});
+test('malformed events and messages are skipped without dropping later valid commands', async () => {
+  const now = 1_800_000_000_000, commands = [];
+  const h = harness({ now: () => now, onCommand: (id) => commands.push(id) });
+  try {
+    await h.wa.start();
+    const socket = h.sockets[0];
+    socket.ev.emit('connection.update', { connection: 'open' });
+    for (const event of [undefined, null, {}, { type: 'notify' }, { type: 'notify', messages: {} }]) {
+      assert.doesNotThrow(() => socket.ev.emit('messages.upsert', event));
+    }
+    const message = (changes = {}) => ({ key: { remoteJid: '12345@g.us', id: 'valid' },
+      messageTimestamp: now / 1000, message: { conversation: '/sticker-test' }, ...changes });
+    assert.doesNotThrow(() => socket.ev.emit('messages.upsert', { type: 'notify', messages: [
+      null, undefined, false, '/sticker-test', {},
+      message({ key: null }), message({ key: { remoteJid: '12345@g.us', id: 42 } }),
+      message({ key: { remoteJid: '12345@g.us', id: ' ' } }),
+      message({ messageTimestamp: Symbol('invalid') }),
+      message({ message: null }), message({ message: { conversation: 42 } }),
+      message({ message: { ephemeralMessage: { message: null } } }),
+      message(),
+    ] }));
+    assert.deepEqual(commands, ['valid']);
   } finally { await h.wa.stop(); h.store.close(); }
 });
 test('logout persists, pauses reconnects and signals need for pairing', async () => {
@@ -139,8 +206,131 @@ test('sends only to configured group with caller-reserved ID; no send retry', as
   await h.wa.send('unique', 'Prices');
   assert.equal(h.sends[0].group, '12345@g.us');
   assert.equal(h.sends[0].opts.messageId, 'unique');
+  assert.deepEqual(h.sends[0].message, { text: 'Prices', linkPreview: null });
   h.wa.groupId = '12345@s.whatsapp.net';
   await assert.rejects(h.wa.send('invalid', 'Prices'), /Invalid configured group/);
   assert.equal(h.sends.length, 1);
   h.wa.stop(); h.store.close();
+});
+
+const sticker = () => readFileSync(new URL('../assets/stickers/sticker-test.webp', import.meta.url));
+const quoted = (remoteJid = '12345@g.us') => ({ key: { remoteJid, id: 'incoming' },
+  message: { conversation: '/sticker-test' } });
+
+test('native WebP sticker replies follow their group, direct phone or LID command', async () => {
+  const h = harness();
+  try {
+    await h.wa.start();
+    h.sockets[0].ev.emit('connection.update', { connection: 'open' });
+    const buffer = sticker();
+    for (const destination of ['12345@g.us', '123@s.whatsapp.net', '456@lid']) {
+      const command = quoted(destination);
+      const result = await h.wa.sendSticker('sticker-reply', buffer, command);
+      assert.equal(result.key.id, 'sticker-reply');
+      assert.deepEqual(h.sends.at(-1), { group: destination,
+        message: { sticker: buffer, mimetype: 'image/webp' },
+        opts: { messageId: 'sticker-reply', quoted: command } });
+      assert.equal(h.sends.at(-1).message.sticker, buffer);
+      assert.equal(h.sends.at(-1).opts.quoted, command);
+    }
+    assert.equal(h.sends.length, 3);
+  } finally { await h.wa.stop(); h.store.close(); }
+});
+
+test('Baileys builds the actual sticker protocol message and quote without a live upload', async () => {
+  const h = harness();
+  try {
+    await h.wa.start();
+    h.sockets[0].ev.emit('connection.update', { connection: 'open' });
+    const uploads = [];
+    h.sockets[0].sendMessage = (group, content, options) => generateWAMessage(group, content, {
+      ...options, userJid: '999@s.whatsapp.net',
+      upload: async (_path, { mediaType }) => {
+        uploads.push(mediaType);
+        return { mediaUrl: 'https://example.invalid/sticker', directPath: '/sticker' };
+      },
+    });
+    const buffer = sticker();
+    for (const destination of ['12345@g.us', '123@s.whatsapp.net', '456@lid']) {
+      const command = quoted(destination);
+      if (destination.endsWith('@g.us')) command.key.participant = '111@s.whatsapp.net';
+      const result = await h.wa.sendSticker('protocol-reply', buffer, command);
+      assert.equal(result.key.remoteJid, destination);
+      assert.equal(result.message.imageMessage, null);
+      const payload = result.message.stickerMessage;
+      assert.equal(payload.mimetype, 'image/webp');
+      assert.equal(Number(payload.fileLength), buffer.length);
+      assert.equal(payload.contextInfo.stanzaId, 'incoming');
+      assert.equal(payload.contextInfo.participant, command.key.participant ?? destination);
+      assert.equal(payload.contextInfo.quotedMessage.conversation, '/sticker-test');
+    }
+    assert.deepEqual(uploads, ['sticker', 'sticker', 'sticker']);
+  } finally { await h.wa.stop(); h.store.close(); }
+});
+
+test('sticker delivery rejects unavailable sockets, invalid groups, quotes and artwork before sending', async () => {
+  const h = harness();
+  try {
+    const buffer = sticker();
+    await assert.rejects(h.wa.sendSticker('offline', buffer, quoted()), /WhatsApp unavailable/);
+    await h.wa.start();
+    h.sockets[0].ev.emit('connection.update', { connection: 'open' });
+    for (const invalid of [undefined, 'not a buffer', Buffer.from('not WebP'), buffer.subarray(0, 20)]) {
+      await assert.rejects(h.wa.sendSticker('invalid', invalid, quoted()));
+    }
+    for (const command of [undefined, null, {},
+      { key: { remoteJid: '12345@g.us', id: '' } },
+      { key: { remoteJid: '12345@g.us', id: ' ' } },
+      { key: { remoteJid: '12345@g.us', id: 123 } },
+      ...['12345@g.us', '123@s.whatsapp.net', '456@lid'].map((remoteJid) => ({
+        key: { remoteJid, id: 'own', fromMe: true },
+      })),
+      ...['999@g.us', 'status@broadcast', '123@broadcast', '123@newsletter',
+        'invalid@s.whatsapp.net', 'invalid@lid'].map(quoted)]) {
+      await assert.rejects(h.wa.sendSticker('invalid-quote', buffer, command), /Invalid quoted sticker command/);
+    }
+    h.wa.groupId = '12345@s.whatsapp.net';
+    await assert.rejects(h.wa.sendSticker('invalid-group', buffer, quoted()), /Invalid quoted sticker command/);
+    assert.equal(h.sends.length, 0);
+  } finally { await h.wa.stop(); h.store.close(); }
+});
+
+test('text and sticker sends require matching acknowledgements and never retry failures', async () => {
+  const h = harness();
+  try {
+    await h.wa.start();
+    h.sockets[0].ev.emit('connection.update', { connection: 'open' });
+    const buffer = sticker();
+    let attempts = 0;
+    for (const send of [() => h.wa.send('reserved', 'Prices'),
+      () => h.wa.sendSticker('reserved', buffer, quoted())]) {
+      for (const response of [undefined, {}, { key: { id: 'different' } }]) {
+        h.sockets[0].sendMessage = async () => { attempts++; return response; };
+        const before = attempts;
+        await assert.rejects(send(), /Missing WhatsApp send acknowledgement/);
+        assert.equal(attempts, before + 1);
+      }
+      h.sockets[0].sendMessage = async () => { attempts++; throw new Error('connection lost'); };
+      const before = attempts;
+      await assert.rejects(send(), /connection lost/);
+      assert.equal(attempts, before + 1);
+    }
+    assert.equal(h.timers.length, 0);
+  } finally { await h.wa.stop(); h.store.close(); }
+});
+
+test('an unacknowledged sticker send times out once without retrying', async (t) => {
+  const h = harness();
+  try {
+    await h.wa.start();
+    h.sockets[0].ev.emit('connection.update', { connection: 'open' });
+    let attempts = 0;
+    h.sockets[0].sendMessage = () => { attempts++; return new Promise(() => {}); };
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const rejected = assert.rejects(h.wa.sendSticker('reserved', sticker(), quoted()), /Operation timed out/);
+    t.mock.timers.tick(30_000);
+    await rejected;
+    assert.equal(attempts, 1);
+    assert.equal(h.timers.length, 0);
+  } finally { t.mock.timers.reset(); await h.wa.stop(); h.store.close(); }
 });
