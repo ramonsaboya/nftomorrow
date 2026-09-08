@@ -53,7 +53,7 @@ Runtime conversion uses pinned Sharp 0.35.4, with one native worker and its cach
 
 Run `npm run verify` in this feature checkout. Tests substitute the OpenAI HTTP response and WhatsApp socket; they exercise real multipart request construction, image decoding/compression and command flows without paid API calls or using the live paired session. Linux staging tests must pass before switching the existing service.
 
-Live activation is pending the API key and a successful first authenticated edit. Retain the current fixed-sticker release for code-only rollback; keep `/var/lib/nftomorrow` untouched. After activation, send the example command from a non-bot account, check the edit resembles the default photo with the requested change, confirm it is a native sticker in the same chat, and save it to favourites. Allow up to three minutes and avoid repeating uncertain requests.
+Application revision `3bbf2af84fefc43b0e69099790b24ecf02dc1109` is staged at `/opt/nftomorrow-image-3bbf2af8` and passed all 83 tests on Linux. Live activation is pending the API key and a successful first authenticated edit. Before activation, recheck that the live revision is still `e2fd3b248abd071dbb902cd190574da7cceedc16`; if it changed, preserve that update in the feature first. Retain the current release for code-only rollback; keep `/var/lib/nftomorrow` untouched. After activation, send the example command from a non-bot account, check the edit resembles the default photo with the requested change, confirm it is a native sticker in the same chat, and save it to favourites. Allow up to three minutes and avoid repeating uncertain requests.
 
 ## Cleanup review
 
