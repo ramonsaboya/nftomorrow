@@ -35,7 +35,7 @@ try {
   let statusCommand, stickerCommand, imageCommand;
   whatsapp = new WhatsApp({ store, groupId: config.groupId, log,
     onCommand: (id, command, message, prompt) => {
-      if (command === '/status') statusCommand.request(id);
+      if (command === '/status') statusCommand.request(id, message.key.remoteJid);
       else if (command === '/sticker-test') stickerCommand.request(id, message);
       else if (command === '/sticker') imageCommand.request(id, message, prompt);
     },

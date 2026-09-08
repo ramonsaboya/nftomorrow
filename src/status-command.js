@@ -10,7 +10,7 @@ export class StatusCommand {
     Object.assign(this, { config, store, whatsapp, health, apiKey, now, getSnapshot, log });
     this.stateKey = `status-command:${config.groupId}`;
   }
-  request(id) {
+  request(id, chatId = this.config.groupId) {
     if (!this.whatsapp.connected || this.pending || this.inFlight) return false;
     const now = this.now();
     const state = this.store.get(this.stateKey, { recent: [] });
@@ -19,7 +19,7 @@ export class StatusCommand {
         || recent.some((entry) => entry.id === id)) return false;
     // Persist acceptance before any network work. Restart never replays a reply.
     this.store.set(this.stateKey, { lastAcceptedAt: now, recent: [...recent, { id, at: now }] });
-    this.pending = { generation: this.whatsapp.generation, at: now };
+    this.pending = { generation: this.whatsapp.generation, at: now, chatId };
     return true;
   }
   async runPending() {
@@ -41,7 +41,7 @@ export class StatusCommand {
       text = formatPrices(snapshot, { displayCurrency: this.config.displayCurrency, now: this.now() });
     } catch {
       snapshot = null;
-      text = 'Current prices are unavailable because the fresh price check failed. Please try /status again in a minute.';
+      text = 'Current prices are unavailable because the fresh price check failed. Please try again in a minute.';
       this.log('status_price_check_failed');
     }
     if (snapshot) this.store.observation(snapshot);
@@ -53,9 +53,9 @@ export class StatusCommand {
       catch { return; }
     }
     const id = `3EB0${randomBytes(14).toString('hex').toUpperCase()}`;
-    this.store.reserve(id, { kind: 'status', groupId: this.config.groupId, snapshot, text }, this.now());
+    this.store.reserve(id, { kind: 'status', chatId: request.chatId, snapshot, text }, this.now());
     try {
-      await this.whatsapp.send(id, text);
+      await this.whatsapp.replyStatus(id, text, request.chatId);
       this.store.transaction(() => {
         this.store.finish(id, 'acknowledged', this.now());
         this.store.set('deliveryUncertain', false);

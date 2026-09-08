@@ -169,7 +169,7 @@ test('real command intake preserves prompts and replies to their group/DM while 
     onCommand: (...args) => commands.push(args), makeSocket: () => socket });
   socket.sendMessage = async (chat, content, options) => { sends.push({ chat, content, options }); return { key: { id: options.messageId } }; };
   try {
-    wa.connect({ state: {}, saveCreds() {} });
+    wa.connect({ state: { creds: { me: { id: '999@s.whatsapp.net' } } }, saveCreds() {} });
     socket.ev.emit('connection.update', { connection: 'open' });
     const message = (id, chat, text) => ({ ...incoming(id, chat), messageTimestamp: now / 1000, message: { conversation: text } });
     socket.ev.emit('messages.upsert', { type: 'notify', messages: [
@@ -178,9 +178,11 @@ test('real command intake preserves prompts and replies to their group/DM while 
       message('other', '999@g.us', '/sticker ignored'), message('ordinary', '123@g.us', 'hello'),
       message('prefix', '123@g.us', '/stickers nope'), message('price-dm', '456@lid', '/status'),
     ] });
-    assert.equal(commands.length, 2);
-    assert.deepEqual(commands.map((c) => [c[1], c[3]]), [['/sticker', 'Make him a DJ'], ['/sticker', 'Wear a RED hat']]);
-    for (const command of commands) await wa.sendGeneratedSticker(command[0], sticker, command[2]);
+    assert.equal(commands.length, 3);
+    assert.equal(commands[2][1], '/status');
+    const imageCommands = commands.filter((c) => c[1] === '/sticker');
+    assert.deepEqual(imageCommands.map((c) => c[3]), ['Make him a DJ', 'Wear a RED hat']);
+    for (const command of imageCommands) await wa.sendGeneratedSticker(command[0], sticker, command[2]);
     assert.deepEqual(sends.map((s) => s.chat), ['123@g.us', '456@lid']);
     await wa.replyText('notice', 'Try again', commands[1][2]);
     assert.equal(sends.at(-1).chat, '456@lid');

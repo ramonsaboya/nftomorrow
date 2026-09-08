@@ -1,9 +1,25 @@
-import makeWASocket, { Browsers, DisconnectReason, normalizeMessageContent } from '@whiskeysockets/baileys';
+import makeWASocket, { Browsers, DisconnectReason, jidNormalizedUser, normalizeMessageContent } from '@whiskeysockets/baileys';
 import pino from 'pino';
 import { sqliteAuth } from './auth.js';
 import { withTimeout } from './http.js';
 import { isStickerChat, validateSticker } from './sticker.js';
 import { validateGeneratedSticker } from './generated-sticker.js';
+
+function isStatusRequest(content, me, direct) {
+  const text = content?.conversation ?? content?.extendedTextMessage?.text;
+  if (typeof text !== 'string') return false;
+  if (direct) return text.trim().toLowerCase() === '/status';
+  // WhatsApp renders the numeric mention token as the recipient's contact name.
+  const match = /^@(\d+)\s+\/?status$/i.exec(text.trim());
+  if (!match) return false;
+  const identities = [me?.id, me?.lid].filter(Boolean).map(jidNormalizedUser);
+  const mentions = content?.extendedTextMessage?.contextInfo?.mentionedJid;
+  if (!Array.isArray(mentions)) return false;
+  return mentions.some((jid) => {
+    const normalized = jidNormalizedUser(jid);
+    return identities.includes(normalized) && normalized.split('@')[0] === match[1];
+  });
+}
 
 export class WhatsApp {
   constructor({ store, groupId, onFresh = () => {}, onStatus = () => {}, onCommand = () => {}, onQr,
@@ -65,8 +81,10 @@ export class WhatsApp {
               || timestamp > this.now() + 60_000 || this.now() - timestamp > 300_000) continue;
           const text = content?.conversation ?? content?.extendedTextMessage?.text;
           const command = typeof text === 'string' ? text.trim().toLowerCase() : null;
-          if ((command === '/status' && key.remoteJid === this.groupId)
-              || (command === '/sticker-test' && isStickerChat(key.remoteJid, this.groupId))) {
+          const direct = /^\d+@(s\.whatsapp\.net|lid)$/.test(key.remoteJid ?? '');
+          if ((direct || key.remoteJid === this.groupId) && isStatusRequest(content, auth.state.creds.me, direct)) {
+            this.onCommand(key.id, '/status', message);
+          } else if (command === '/sticker-test' && isStickerChat(key.remoteJid, this.groupId)) {
             this.onCommand(key.id, command, message);
           } else if (typeof text === 'string' && /^\/sticker(?:\s|$)/i.test(text.trim())
               && isStickerChat(key.remoteJid, this.groupId)) {
@@ -132,6 +150,16 @@ export class WhatsApp {
   }
   async send(id, text) {
     return this.#sendContent(id, { text, linkPreview: null });
+  }
+  async replyStatus(id, text, chatId) {
+    if (!this.connected || !this.socket) throw new Error('WhatsApp unavailable');
+    if (chatId !== this.groupId && !/^\d+@(s\.whatsapp\.net|lid)$/.test(chatId ?? '')) {
+      throw new Error('Invalid status recipient');
+    }
+    const result = await withTimeout(this.socket.sendMessage(chatId,
+      { text, linkPreview: null }, { messageId: id }), 30_000);
+    if (result?.key?.id !== id) throw new Error('Missing WhatsApp send acknowledgement');
+    return result;
   }
   async sendSticker(id, stickerBuffer, quotedMessage) {
     validateSticker(stickerBuffer);

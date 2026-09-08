@@ -56,12 +56,12 @@ test('accepts only fresh group status and sticker text commands, including disap
     const socket = h.sockets[0];
     socket.ev.emit('connection.update', { connection: 'open' });
     const message = (id, changes = {}) => ({ key: { remoteJid: '12345@g.us', id },
-      messageTimestamp: now / 1000, message: { conversation: '/status' }, ...changes });
+      messageTimestamp: now / 1000, message: { extendedTextMessage: { text: '@123 status', contextInfo: { mentionedJid: ['123@s.whatsapp.net'] } } }, ...changes });
     const stickerMessage = message('sticker', { message: { conversation: '/sticker-test' } });
     socket.ev.emit('messages.upsert', { type: 'notify', messages: [
       message('plain'),
-      message('extended', { message: { extendedTextMessage: { text: ' /STATUS ' } } }),
-      message('ephemeral', { message: { ephemeralMessage: { message: { conversation: '/status' } } } }),
+      message('extended', { message: { extendedTextMessage: { text: ' @123 STATUS ', contextInfo: { mentionedJid: ['123@s.whatsapp.net'] } } } }),
+      message('ephemeral', { message: { ephemeralMessage: { message: { extendedTextMessage: { text: '@123 status', contextInfo: { mentionedJid: ['123@s.whatsapp.net'] } } } } } }),
       stickerMessage,
       message('sticker-extended', { message: { extendedTextMessage: { text: ' /STICKER-TEST ' } } }),
       message('sticker-ephemeral', { message: { ephemeralMessage: { message: { conversation: '/sticker-test' } } } }),
@@ -97,7 +97,7 @@ test('accepts only fresh group status and sticker text commands, including disap
     assert.equal(commands.length, 6);
   } finally { await h.wa.stop(); h.store.close(); }
 });
-test('direct phone and LID chats accept only fresh sticker commands and reject other destinations', async () => {
+test('direct phone and LID chats accept fresh sticker and status commands and reject other destinations', async () => {
   const now = 1_800_000_000_000, commands = [];
   const h = harness({ now: () => now, onCommand: (id, command, message) => commands.push({ id, command, message }) });
   try {
@@ -123,8 +123,10 @@ test('direct phone and LID chats accept only fresh sticker commands and reject o
         'invalid@s.whatsapp.net', 'invalid@lid', '', undefined].map((jid) => message('invalid', jid)),
     ] });
     socket.ev.emit('messages.upsert', { type: 'append', messages: [message('history', '123@s.whatsapp.net')] });
-    assert.deepEqual(commands, directMessages.map((message) => ({ id: message.key.id,
+    assert.deepEqual(commands.slice(0, 2), directMessages.map((message) => ({ id: message.key.id,
       command: '/sticker-test', message })));
+    assert.deepEqual(commands.slice(2).map(({ command, message }) => [command, message.key.remoteJid]),
+      [['/status', '123@s.whatsapp.net'], ['/status', '456@lid']]);
   } finally { await h.wa.stop(); h.store.close(); }
 });
 test('malformed events and messages are skipped without dropping later valid commands', async () => {
@@ -149,6 +151,42 @@ test('malformed events and messages are skipped without dropping later valid com
       message(),
     ] }));
     assert.deepEqual(commands, ['valid']);
+  } finally { await h.wa.stop(); h.store.close(); }
+});
+test('status mentions match the bot phone or LID identity and require an actual tag', async () => {
+  const now = 1_800_000_000_000, commands = [];
+  const h = harness({ now: () => now, onCommand: (id) => commands.push(id) });
+  try {
+    const auth = sqliteAuth(h.store);
+    auth.state.creds.me.lid = '456:2@lid';
+    auth.saveCreds();
+    await h.wa.start();
+    const socket = h.sockets[0];
+    socket.ev.emit('connection.update', { connection: 'open' });
+    const emit = (id, text, mentions, { ephemeral = false, group = '12345@g.us', fromMe = false } = {}) => {
+      const content = { extendedTextMessage: { text, contextInfo: { mentionedJid: mentions } } };
+      socket.ev.emit('messages.upsert', { type: 'notify', messages: [{
+        key: { id, remoteJid: group, fromMe }, messageTimestamp: now / 1000,
+        message: ephemeral ? { ephemeralMessage: { message: content } } : content,
+      }] });
+    };
+    emit('phone', '@123 status', ['123@s.whatsapp.net']);
+    emit('lid', '  @456 STATUS  ', ['456@lid'], { ephemeral: true });
+    emit('group-slash', '/status', []);
+    emit('tagged-slash', '@123 /status', ['123@s.whatsapp.net']);
+    emit('private-slash', '/STATUS', [], { group: '789@s.whatsapp.net' });
+    emit('private-lid', '/status', [], { group: '789@lid' });
+    emit('no-tag', '@123 status', []);
+    emit('literal-name', '@Dobby status', []);
+    emit('other-person', '@789 status', ['789@s.whatsapp.net']);
+    emit('wrong-token', '@789 status', ['123@s.whatsapp.net']);
+    emit('wrong-domain', '@123 status', ['123@lid']);
+    emit('extra-text', '@123 status please', ['123@s.whatsapp.net']);
+    emit('bare', 'status', ['123@s.whatsapp.net']);
+    emit('other-group', '@123 status', ['123@s.whatsapp.net'], { group: '999@g.us' });
+    emit('dm', '@123 status', ['123@s.whatsapp.net'], { group: '123@s.whatsapp.net' });
+    emit('own', '@123 status', ['123@s.whatsapp.net'], { fromMe: true });
+    assert.deepEqual(commands, ['phone', 'lid', 'tagged-slash', 'private-slash', 'private-lid']);
   } finally { await h.wa.stop(); h.store.close(); }
 });
 test('logout persists, pauses reconnects and signals need for pairing', async () => {
@@ -333,4 +371,20 @@ test('an unacknowledged sticker send times out once without retrying', async (t)
     assert.equal(attempts, 1);
     assert.equal(h.timers.length, 0);
   } finally { t.mock.timers.reset(); await h.wa.stop(); h.store.close(); }
+});
+
+test('status transport replies privately and rejects unrelated groups and broadcasts', async () => {
+  const h = harness();
+  try {
+    await h.wa.start();
+    h.sockets[0].ev.emit('connection.update', { connection: 'open' });
+    for (const chatId of ['123@s.whatsapp.net', '456@lid', '12345@g.us']) {
+      await h.wa.replyStatus('reply', 'Prices', chatId);
+      assert.equal(h.sends.at(-1).group, chatId);
+    }
+    for (const chatId of ['999@g.us', 'status@broadcast', undefined]) {
+      await assert.rejects(h.wa.replyStatus('bad', 'Prices', chatId));
+    }
+    assert.equal(h.sends.length, 3);
+  } finally { await h.wa.stop(); h.store.close(); }
 });
