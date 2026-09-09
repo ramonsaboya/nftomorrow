@@ -275,14 +275,14 @@ test('uncertain sticker delivery is audited and never automatically retried', as
   } finally { h.store.close(); }
 });
 
-test('invalid identifiers, missing messages, other groups, own requests and offline requests are ignored', async () => {
+test('invalid identifiers, missing messages, invalid groups, own requests and offline requests are ignored', async () => {
   const h = harness();
   try {
     for (const [id, message] of [
       ['', incoming('')], [undefined, incoming()], [42, incoming(42)],
       ['one', undefined], ['one', {}], ['one', { key: {} }],
       ['one', incoming('different')],
-      ['one', incoming('one', { remoteJid: '999@g.us' })],
+      ['one', incoming('one', { remoteJid: 'invalid@g.us' })],
       ['one', incoming('one', { remoteJid: 'status@broadcast' })],
       ['one', incoming('one', { remoteJid: '123@newsletter' })],
       ['one', incoming('one', { remoteJid: 'malformed@s.whatsapp.net' })],
@@ -329,7 +329,7 @@ test('status and sticker commands have independent cooldowns and do not consume 
 test('phone-number and LID direct chats preserve the request quote and have independent cooldowns', async () => {
   const h = harness();
   try {
-    const chats = [h.config.groupId, '447700900111@s.whatsapp.net', '1234567890@lid'];
+    const chats = [h.config.groupId, '999@g.us', '447700900111@s.whatsapp.net', '1234567890@lid'];
     // The same request ID in different chats must not collide in persistent acceptance.
     for (const chatId of chats) {
       const request = incoming('same-id', { remoteJid: chatId });
@@ -339,7 +339,7 @@ test('phone-number and LID direct chats preserve the request quote and have inde
       assert.equal(h.store.deliveries().at(-1).data.chatId, chatId);
       assert.equal(h.store.get(`sticker-command:${chatId}`).recent[0].id, 'same-id');
     }
-    assert.equal(h.stickers.length, 3);
+    assert.equal(h.stickers.length, chats.length);
     for (const chatId of chats) {
       assert.equal(h.command.request('new-id', incoming('new-id', { remoteJid: chatId })), false);
     }
@@ -350,7 +350,7 @@ test('phone-number and LID direct chats preserve the request quote and have inde
       assert.equal(restarted.request('new-id', incoming('new-id', { remoteJid: chatId })), true);
       await restarted.runPending();
     }
-    assert.equal(h.stickers.length, 6);
+    assert.equal(h.stickers.length, chats.length * 2);
     assert.equal(h.fetches(), 0);
     assert.equal(h.texts.length, 0);
   } finally { h.store.close(); }
@@ -403,7 +403,7 @@ test('socket events route group and direct commands to quoted native stickers an
     assert.doesNotThrow(() => emit([
       null, {}, message('missing-key', { key: null }),
       message('invalid-id', { key: { remoteJid: h.config.groupId, id: ' ' } }),
-      message('other-group', { key: { id: 'other-group', remoteJid: '999@g.us' } }),
+      message('other-group', { key: { id: 'other-group', remoteJid: 'invalid@g.us' } }),
       message('own', { key: { id: 'own', remoteJid: h.config.groupId, fromMe: true } }),
       message('old', { messageTimestamp: h.now() / 1000 - 1 }),
       message('invalid-time', { messageTimestamp: Symbol('invalid') }),

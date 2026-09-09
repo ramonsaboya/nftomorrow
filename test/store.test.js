@@ -29,7 +29,8 @@ test('state and Buffer/Signal keys survive restart; batches roll back on failure
     assert.deepEqual((await restored.state.keys.get('app-state-sync-key', ['first'])).first.keyData, Buffer.from([5, 6]));
     await restored.state.keys.set({ session: { alice: null } });
     assert.deepEqual(await restored.state.keys.get('session', ['alice']), {});
-    assert.equal(statSync(path).mode & 0o777, 0o600);
+    // Windows uses ACLs and does not implement POSIX owner-only mode bits.
+    if (process.platform !== 'win32') assert.equal(statSync(path).mode & 0o777, 0o600);
   } finally { store?.close(); rmSync(dir, { recursive: true, force: true }); }
 });
 test('delivery attempts become uncertain after crash and audit survives', () => {

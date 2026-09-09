@@ -45,6 +45,33 @@ function harness(overrides = {}) {
     advance: (ms) => { now += ms; } };
 }
 
+test('both image modes share one job slot and budget and return to an unregistered group', async () => {
+  const modes = [];
+  const h = harness({ generate: async ({ mode }) => { modes.push(mode); return { sticker, usage: {} }; } });
+  try {
+    for (const [index, mode] of ['reference', 'freeform'].entries()) {
+      const message = incoming('mode-' + index, '999@g.us');
+      assert.equal(h.command.request(message.key.id, message, 'Make him a DJ', mode), true);
+      assert.equal(h.command.request('busy', incoming('busy', '888@g.us'), 'Dragon', 'freeform'), false);
+      await h.command.runPending();
+      assert.equal(h.sends.at(-1).quote.key.remoteJid, '999@g.us');
+      h.advance(60_000);
+    }
+    assert.deepEqual(modes, ['reference', 'freeform']);
+    assert.equal(h.store.get('image-sticker-budget').used, 2);
+  } finally { h.store.close(); }
+});
+
+test('reference edits require a theme and explain their own command without billing', async () => {
+  const h = harness();
+  try {
+    h.command.request('empty', incoming('empty'), '', 'reference');
+    await h.command.runPending();
+    assert.match(h.notices[0].text, /\/euvousticker.*overall theme or scene/);
+    assert.equal(h.calls(), 0);
+  } finally { h.store.close(); }
+});
+
 test('image prompts reserve paid work durably, then send a validated quoted sticker without storing prompt text', async () => {
   const h = harness();
   try {
@@ -55,7 +82,7 @@ test('image prompts reserve paid work durably, then send a validated quoted stic
     const rows = h.store.deliveries();
     assert.equal(rows[0].data.kind, 'sticker-processing'); assert.equal(rows[0].status, 'acknowledged');
     assert.equal(rows[1].status, 'generated'); assert.equal(rows[2].status, 'acknowledged');
-    assert.equal(rows[2].data.model, 'gpt-image-2');
+    assert.equal(rows[2].data.model, 'gpt-image-2.5-sunburst');
     assert.equal(rows[2].data.generationId, rows[1].id);
     assert.equal(h.acknowledgements.length, 1);
     assert.match(h.acknowledgements[0].text, /Dobby’s on it/);
@@ -182,7 +209,7 @@ test('failure references correlate safe diagnostic logs with useful billing noti
     h.command.request('request', incoming(), 'Make him a DJ'); await h.command.runPending();
     const failure = h.logs.find(([event]) => event === 'sticker_generation_failed')[1];
     assert.equal(failure.status, 400); assert.equal(failure.apiCode, 'billing_hard_limit_reached');
-    assert.equal(failure.requestId, 'req_billing'); assert.equal(failure.stage, 'image_edit');
+    assert.equal(failure.requestId, 'req_billing'); assert.equal(failure.stage, 'image_generation');
     assert.equal(failure.generationId, h.store.deliveries().find((d) => d.data.kind === 'sticker-generation').id);
     assert.equal(failure.reference, failure.generationId.slice(-8));
     assert.match(h.notices[0].text, /billing or credit limit/);
@@ -251,16 +278,16 @@ test('real command intake preserves prompts and replies to their group/DM while 
       message('other', '999@g.us', '/sticker ignored'), message('ordinary', '123@g.us', 'hello'),
       message('prefix', '123@g.us', '/stickers nope'), message('price-dm', '456@lid', '/status'),
     ] });
-    assert.equal(commands.length, 3);
-    assert.equal(commands[2][1], '/status');
+    assert.equal(commands.length, 4);
+    assert.equal(commands[3][1], '/status');
     const imageCommands = commands.filter((c) => c[1] === '/sticker');
-    assert.deepEqual(imageCommands.map((c) => c[3]), ['Make him a DJ', 'Wear a RED hat']);
+    assert.deepEqual(imageCommands.map((c) => c[3]), ['Make him a DJ', 'Wear a RED hat', 'ignored']);
     for (const command of imageCommands) await wa.sendGeneratedSticker(command[0], sticker, command[2]);
-    assert.deepEqual(sends.map((s) => s.chat), ['123@g.us', '456@lid']);
+    assert.deepEqual(sends.map((s) => s.chat), ['123@g.us', '456@lid', '999@g.us']);
     await wa.replyText('notice', 'Try again', commands[1][2]);
     assert.equal(sends.at(-1).chat, '456@lid');
     await wa.send('price', 'Prices'); assert.equal(sends.at(-1).chat, '123@g.us');
-    await assert.rejects(wa.replyText('invalid', 'Never send', incoming('other', '999@g.us')));
+    await assert.rejects(wa.replyText('invalid', 'Never send', incoming('other', 'invalid@g.us')));
     await assert.rejects(wa.sendGeneratedSticker('invalid', Buffer.from('bad'), commands[0][2]));
     const before = sends.length;
     const interrupted = wa.sendGeneratedSticker('reconnected', sticker, commands[0][2]);

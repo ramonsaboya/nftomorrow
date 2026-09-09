@@ -27,6 +27,22 @@ function harness() {
     advance: (ms) => { now += ms; }, fetches: () => fetches };
 }
 
+test('status cooldown and reply destination are independent across unregistered groups', async () => {
+  const h = harness();
+  try {
+    const destinations = [];
+    h.whatsapp.replyStatus = async (_id, text, chatId) => {
+      assert.match(text, /Medallion:/); destinations.push(chatId);
+    };
+    for (const chat of ['999@g.us', '888-777@g.us']) {
+      assert.equal(h.command.request('same-id', chat), true);
+      await h.command.runPending();
+      assert.equal(h.command.request('another-id', chat), false);
+    }
+    assert.deepEqual(destinations, ['999@g.us', '888-777@g.us']);
+  } finally { h.store.close(); }
+});
+
 test('fresh status replies are audited and leave automatic alert and summary scheduling intact', async () => {
   const h = harness();
   try {

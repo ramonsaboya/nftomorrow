@@ -1,15 +1,21 @@
 import { readFile } from 'node:fs/promises';
 import { makeGeneratedSticker } from './generated-sticker.js';
 
-export const IMAGE_MODEL = 'gpt-image-2';
+export const IMAGE_MODEL = 'gpt-image-2.5-sunburst';
 export const REFERENCE_URL = new URL('../assets/stickers/default-reference.png', import.meta.url);
 export const MAX_PROMPT_LENGTH = 1000;
 const MAX_RESPONSE_BYTES = 16 * 1024 * 1024;
-const INSTRUCTIONS = 'Edit the supplied reference photo according to the user request. '
-  + 'Keep the person recognizable and preserve facial identity unless the requested change requires otherwise. '
-  + 'Create one expressive WhatsApp sticker: isolated subject, fully transparent background, '
-  + 'clean white outline, square composition, generous transparent margin, and no cropping of the subject. '
-  + 'Remove the original sofa/background. Add text only if the user requests it. User request: ';
+const INSTRUCTIONS = 'Customize the supplied original photo using the user\'s overall theme or scene. '
+  + 'Create a square, full-frame image with an opaque background, not a transparent cutout or outlined sticker. '
+  + 'By default stay very close to the original: preserve the man\'s facial identity, appearance, pose, framing, '
+  + 'sofa and surroundings. Build on the existing photo with themed clothes, accessories and small details; '
+  + 'make only the pose, appearance and scene changes needed for the requested theme. '
+  + 'Allow major transformations when the user explicitly asks to go crazy, be creative or change those details. '
+  + 'Add a caption only when requested. By default place it in the bottom-left corner, unless another location '
+  + 'clearly makes more sense for the composition or is requested. Use readable plain black text in a simple, '
+  + 'square sans-serif font, perfectly horizontal, without a background box, outline, shadow, tilt or decoration. '
+  + 'Choose a readable placement and size. Elaborate typography is allowed only when explicitly requested. '
+  + 'User theme and customization: ';
 
 export class ImageEditError extends Error {
   constructor(code, details = {}) { super('Image edit failed'); this.code = code; this.details = details; }
@@ -55,29 +61,40 @@ async function responseJson(response, maxBytes = MAX_RESPONSE_BYTES) {
   } finally { reader.releaseLock(); }
 }
 
-export async function editReference({ prompt, apiKey, quality = 'medium', signal,
+export function editReference(options) { return createImage({ ...options, mode: 'reference' }); }
+export function generateSticker(options) { return createImage({ ...options, mode: 'freeform' }); }
+
+async function createImage({ prompt, apiKey, quality = 'max', signal, mode,
   fetchImpl = fetch, readReference = () => readFile(REFERENCE_URL),
   convert = makeGeneratedSticker, timeoutMs = 180_000 }) {
   if (!apiKey) throw new ImageEditError('not_configured');
   if (typeof prompt !== 'string' || !prompt.trim() || prompt.length > MAX_PROMPT_LENGTH
-      || !['low', 'medium', 'high'].includes(quality)) throw new ImageEditError('invalid_request');
+      || !['low', 'medium', 'high', 'xhigh', 'max', 'auto'].includes(quality)) throw new ImageEditError('invalid_request');
   const requestSignal = AbortSignal.any([AbortSignal.timeout(timeoutMs), ...(signal ? [signal] : [])]);
   requestSignal.throwIfAborted();
-  let reference;
-  try { reference = await readReference(); }
-  catch { throw new ImageEditError('reference_unavailable'); }
-  if (!Buffer.isBuffer(reference) || !reference.length || reference.length > 10 * 1024 * 1024) {
-    throw new ImageEditError('invalid_reference');
+  let body, headers = { Authorization: `Bearer ${apiKey}` };
+  const params = { model: IMAGE_MODEL, prompt: mode === 'reference' ? INSTRUCTIONS + prompt.trim() : prompt.trim(),
+    n: 1, size: '1024x1024', quality, background: mode === 'reference' ? 'opaque' : 'auto', output_format: 'png' };
+  if (mode === 'reference') {
+    let reference;
+    try { reference = await readReference(); }
+    catch { throw new ImageEditError('reference_unavailable'); }
+    if (!Buffer.isBuffer(reference) || !reference.length || reference.length > 10 * 1024 * 1024) {
+      throw new ImageEditError('invalid_reference');
+    }
+    const form = new FormData();
+    for (const [key, value] of Object.entries(params)) form.set(key, String(value));
+    form.set('image[]', new Blob([reference], { type: 'image/png' }), 'reference.png');
+    body = form;
+  } else {
+    body = JSON.stringify(params);
+    headers['Content-Type'] = 'application/json';
   }
-  const form = new FormData();
-  for (const [key, value] of Object.entries({ model: IMAGE_MODEL, prompt: INSTRUCTIONS + prompt.trim(),
-    n: '1', size: '1024x1024', quality, background: 'transparent', output_format: 'png' })) form.set(key, value);
-  form.set('image[]', new Blob([reference], { type: 'image/png' }), 'reference.png');
   requestSignal.throwIfAborted();
   // One paid attempt. Never auto-retry an uncertain image-generation request.
   let response;
-  try { response = await fetchImpl('https://api.openai.com/v1/images/edits', {
-    method: 'POST', headers: { Authorization: `Bearer ${apiKey}` }, body: form,
+  try { response = await fetchImpl(`https://api.openai.com/v1/images/${mode === 'reference' ? 'edits' : 'generations'}`, {
+    method: 'POST', headers, body,
     signal: requestSignal, redirect: 'error',
   }); } catch {
     requestSignal.throwIfAborted();

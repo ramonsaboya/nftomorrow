@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { StickerCommand } from './sticker-command.js';
-import { editReference, imageErrorDetails, IMAGE_MODEL, MAX_PROMPT_LENGTH } from './image-edit.js';
+import { editReference, generateSticker, imageErrorDetails, IMAGE_MODEL, MAX_PROMPT_LENGTH } from './image-edit.js';
 import { validateGeneratedSticker } from './generated-sticker.js';
 
 const messageId = () => `3EB0${randomBytes(14).toString('hex').toUpperCase()}`;
@@ -17,14 +17,15 @@ function failureNotice(error) {
 }
 
 export class ImageStickerCommand extends StickerCommand {
-  constructor({ apiKey = '', quality = 'medium', dailyLimit = 20, signal,
-    generate = editReference, ...dependencies }) {
+  constructor({ apiKey = '', quality = 'max', dailyLimit = 20, signal,
+    generate = (options) => options.mode === 'reference' ? editReference(options) : generateSticker(options), ...dependencies }) {
     super({ ...dependencies, statePrefix: 'image-sticker-command' });
     Object.assign(this, { apiKey, quality, dailyLimit, signal, generate });
   }
-  request(id, message, prompt) {
-    if (typeof prompt !== 'string' || this.signal?.aborted || !super.request(id, message)) return false;
+  request(id, message, prompt, mode = 'freeform') {
+    if (!['freeform', 'reference'].includes(mode) || typeof prompt !== 'string' || this.signal?.aborted || !super.request(id, message)) return false;
     this.pending.prompt = prompt.trim();
+    this.pending.mode = mode;
     return true;
   }
   available(request) {
@@ -61,7 +62,9 @@ export class ImageStickerCommand extends StickerCommand {
   async reply(request) {
     if (!this.available(request)) return;
     if (!request.prompt || request.prompt.length > MAX_PROMPT_LENGTH) {
-      await this.note(request, 'Use /sticker followed by a description, up to 1,000 characters. Example: /sticker make him a DJ');
+      await this.note(request, request.mode === 'reference'
+        ? 'Use /euvousticker followed by an overall theme or scene, up to 1,000 characters. Example: /euvousticker beach holiday, caption "Eu vou"'
+        : 'Use /sticker followed by a description, up to 1,000 characters. Example: /sticker a dancing dragon');
       return;
     }
     if (!this.apiKey) {
@@ -87,14 +90,14 @@ export class ImageStickerCommand extends StickerCommand {
     const jobId = `image-${messageId()}`;
     this.store.transaction(() => {
       this.store.set('image-sticker-budget', { day, used: used + 1 });
-      this.store.reserve(jobId, { kind: 'sticker-generation', chatId: request.chatId, model: IMAGE_MODEL,
+      this.store.reserve(jobId, { kind: 'sticker-generation', chatId: request.chatId, model: IMAGE_MODEL, mode: request.mode,
         promptHash: createHash('sha256').update(request.prompt).digest('hex') }, this.now());
     });
     let result, asset;
     const startedAt = this.now(), reference = jobId.slice(-8);
-    let stage = 'image_edit';
+    let stage = request.mode === 'reference' ? 'image_edit' : 'image_generation';
     try {
-      result = await this.generate({ prompt: request.prompt, apiKey: this.apiKey,
+      result = await this.generate({ prompt: request.prompt, apiKey: this.apiKey, mode: request.mode,
         quality: this.quality, signal: this.signal });
       stage = 'sticker_validation';
       asset = await validateGeneratedSticker(result.sticker);

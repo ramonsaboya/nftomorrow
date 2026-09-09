@@ -1,8 +1,9 @@
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import sharp from 'sharp';
-import { editReference, imageErrorDetails, REFERENCE_URL } from '../src/image-edit.js';
+import { editReference, generateSticker, imageErrorDetails, REFERENCE_URL } from '../src/image-edit.js';
 import { makeGeneratedSticker, validateGeneratedSticker } from '../src/generated-sticker.js';
 import { loadConfig } from '../src/config.js';
 
@@ -17,6 +18,31 @@ async function artwork({ transparent = true, blank = false, width = 128, height 
 }
 const png = await artwork();
 
+test('freeform generation sends the exact user prompt without a reference or style instructions', async () => {
+  const prompt = 'A purple dragon, wildly creative, caption OLÁ in ornate gold lettering';
+  const result = await generateSticker({ prompt, apiKey: 'test',
+    readReference: () => { throw new Error('Must not read or upload a reference'); },
+    fetchImpl: async (url, options) => {
+      assert.equal(url, 'https://api.openai.com/v1/images/generations');
+      assert.equal(options.headers['Content-Type'], 'application/json');
+      assert.deepEqual(JSON.parse(options.body), { model: 'gpt-image-2.5-sunburst', prompt,
+        n: 1, size: '1024x1024', quality: 'max', background: 'auto', output_format: 'png' });
+      return Response.json({ data: [{ b64_json: (await artwork({ transparent: false })).toString('base64') }] });
+    } });
+  await validateGeneratedSticker(result.sticker);
+});
+
+test('opaque reference artwork stays square and opaque, including RGB images without an alpha channel', async () => {
+  for (const input of [await artwork({ transparent: false }),
+    await sharp(await artwork({ transparent: false })).removeAlpha().png().toBuffer()]) {
+    const result = await makeGeneratedSticker(input);
+    await validateGeneratedSticker(result);
+    const { data, info } = await sharp(result).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+    assert.equal(info.width, 512); assert.equal(info.height, 512);
+    for (let i = 3; i < data.length; i += 4) assert.equal(data[i], 255);
+  }
+});
+
 test('generated artwork becomes a decodable static transparent 512px sticker under 100 KB', async () => {
   const sticker = await makeGeneratedSticker(png);
   const info = await validateGeneratedSticker(sticker);
@@ -28,9 +54,8 @@ test('generated artwork becomes a decodable static transparent 512px sticker und
   await assert.rejects(validateGeneratedSticker(sticker.subarray(0, 45)));
 });
 
-test('opaque, blank, animated/invalid, oversized and excessive-pixel images fail closed', async () => {
+test('blank, animated/invalid, oversized and excessive-pixel images fail closed', async () => {
   for (const invalid of [Buffer.from('broken'), Buffer.alloc(12 * 1024 * 1024 + 1),
-    await artwork({ transparent: false }), await artwork({ transparent: false, height: 96 }),
     await artwork({ blank: true }), await sharp({ create: { width: 4096, height: 4096,
       channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } }).png().toBuffer()]) {
     await assert.rejects(makeGeneratedSticker(invalid));
@@ -38,7 +63,7 @@ test('opaque, blank, animated/invalid, oversized and excessive-pixel images fail
   await assert.rejects(validateGeneratedSticker(Buffer.alloc(100_001)));
 });
 
-test('exact GPT Image 2 edit uploads the original reference, preserves prompt case and requests transparency', async () => {
+test('premium reference edit uploads the original and requests opaque square artwork', async () => {
   const requests = [];
   const result = await editReference({ prompt: 'Make him a DJ saying OLÁ', apiKey: 'test-key',
     fetchImpl: async (url, options) => {
@@ -51,8 +76,8 @@ test('exact GPT Image 2 edit uploads the original reference, preserves prompt ca
   assert.equal(url, 'https://api.openai.com/v1/images/edits');
   assert.equal(options.headers.Authorization, 'Bearer test-key');
   assert.equal(options.method, 'POST'); assert.equal(options.redirect, 'error');
-  for (const [name, value] of Object.entries({ model: 'gpt-image-2', n: '1', size: '1024x1024',
-    quality: 'medium', background: 'transparent', output_format: 'png' })) {
+  for (const [name, value] of Object.entries({ model: 'gpt-image-2.5-sunburst', n: '1', size: '1024x1024',
+    quality: 'max', background: 'opaque', output_format: 'png' })) {
     assert.equal(options.body.get(name), value);
   }
   assert.equal(options.body.has('input_fidelity'), false);
@@ -80,7 +105,7 @@ test('missing key, bad prompt, missing reference and pre-aborted work never call
   const base = { prompt: 'Edit', apiKey: 'test', readReference: async () => png,
     fetchImpl: async () => { calls++; throw new Error('unexpected'); } };
   for (const changes of [{ apiKey: '' }, { prompt: '' }, { prompt: 'a'.repeat(1001) },
-    { quality: 'auto' }, { readReference: async () => { throw new Error('private filepath'); } },
+    { quality: 'invalid' }, { readReference: async () => { throw new Error('private filepath'); } },
     { signal: AbortSignal.abort() }]) await assert.rejects(editReference({ ...base, ...changes }));
   assert.equal(calls, 0);
 });
@@ -125,8 +150,8 @@ test('the API deadline cancels a hung paid attempt without retrying', async () =
 });
 
 test('image configuration has explicit defaults and validates quality and daily limits', () => {
-  const env = { CONFIG_PATH: new URL('../config.example.json', import.meta.url).pathname };
-  assert.deepEqual(loadConfig(env).imageStickers, { apiKey: '', quality: 'medium', dailyLimit: 20 });
+  const env = { CONFIG_PATH: fileURLToPath(new URL('../config.example.json', import.meta.url)) };
+  assert.deepEqual(loadConfig(env).imageStickers, { apiKey: '', quality: 'max', dailyLimit: 20 });
   assert.deepEqual(loadConfig({ ...env, OPENAI_API_KEY: ' test ', OPENAI_IMAGE_QUALITY: 'high', STICKER_DAILY_LIMIT: '5' }).imageStickers,
     { apiKey: 'test', quality: 'high', dailyLimit: 5 });
   for (const changes of [{ OPENAI_IMAGE_QUALITY: 'invalid' }, { STICKER_DAILY_LIMIT: '0' },

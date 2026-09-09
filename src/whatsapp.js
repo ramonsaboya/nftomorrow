@@ -5,20 +5,31 @@ import { withTimeout } from './http.js';
 import { isStickerChat, validateSticker } from './sticker.js';
 import { validateGeneratedSticker } from './generated-sticker.js';
 
-function isStatusRequest(content, me, direct) {
+export function parseCommand(content, me) {
   const text = content?.conversation ?? content?.extendedTextMessage?.text;
-  if (typeof text !== 'string') return false;
-  if (direct) return text.trim().toLowerCase() === '/status';
-  // WhatsApp renders the numeric mention token as the recipient's contact name.
-  const match = /^@(\d+)\s+\/?status$/i.exec(text.trim());
-  if (!match) return false;
-  const identities = [me?.id, me?.lid].filter(Boolean).map(jidNormalizedUser);
-  const mentions = content?.extendedTextMessage?.contextInfo?.mentionedJid;
-  if (!Array.isArray(mentions)) return false;
-  return mentions.some((jid) => {
-    const normalized = jidNormalizedUser(jid);
-    return identities.includes(normalized) && normalized.split('@')[0] === match[1];
-  });
+  if (typeof text !== 'string') return null;
+  let commandText = text.trim();
+  if (!commandText.startsWith('/')) {
+    // WhatsApp renders the numeric mention token as the recipient's contact name.
+    const match = /^@(\d+)\s+([\s\S]+)$/.exec(commandText);
+    if (!match) return null;
+    const identities = [me?.id, me?.lid].filter(Boolean).map(jidNormalizedUser);
+    const mentions = content?.extendedTextMessage?.contextInfo?.mentionedJid;
+    if (!Array.isArray(mentions)) return null;
+    const addressed = mentions.some((jid) => {
+      if (typeof jid !== 'string') return false;
+      const normalized = jidNormalizedUser(jid);
+      return identities.includes(normalized) && normalized.split('@')[0] === match[1];
+    });
+    if (!addressed) return null;
+    commandText = '/' + match[2].replace(/^\//, '');
+  }
+  const match = /^\/(status|sticker-test|euvousticker|sticker)(?:\s+([\s\S]*))?$/i.exec(commandText);
+  if (!match) return null;
+  const command = '/' + match[1].toLowerCase();
+  const prompt = (match[2] ?? '').trim();
+  if (['/status', '/sticker-test'].includes(command) && prompt) return null;
+  return { command, prompt };
 }
 
 export class WhatsApp {
@@ -79,17 +90,10 @@ export class WhatsApp {
           } catch { continue; }
           if (!Number.isFinite(timestamp) || timestamp < openedAt
               || timestamp > this.now() + 60_000 || this.now() - timestamp > 300_000) continue;
-          const text = content?.conversation ?? content?.extendedTextMessage?.text;
-          const command = typeof text === 'string' ? text.trim().toLowerCase() : null;
-          const direct = /^\d+@(s\.whatsapp\.net|lid)$/.test(key.remoteJid ?? '');
-          if ((direct || key.remoteJid === this.groupId) && isStatusRequest(content, auth.state.creds.me, direct)) {
-            this.onCommand(key.id, '/status', message);
-          } else if (command === '/sticker-test' && isStickerChat(key.remoteJid, this.groupId)) {
-            this.onCommand(key.id, command, message);
-          } else if (typeof text === 'string' && /^\/sticker(?:\s|$)/i.test(text.trim())
-              && isStickerChat(key.remoteJid, this.groupId)) {
-            this.onCommand(key.id, '/sticker', message, text.trim().slice(8).trim());
-          }
+          if (!isStickerChat(key.remoteJid)) continue;
+          const parsed = parseCommand(content, auth.state.creds.me);
+          if (parsed) this.onCommand(key.id, parsed.command, message,
+            ['/sticker', '/euvousticker'].includes(parsed.command) ? parsed.prompt : undefined);
         }
       });
       socket.ev.on('creds.update', () => {
@@ -153,7 +157,7 @@ export class WhatsApp {
   }
   async replyStatus(id, text, chatId) {
     if (!this.connected || !this.socket) throw new Error('WhatsApp unavailable');
-    if (chatId !== this.groupId && !/^\d+@(s\.whatsapp\.net|lid)$/.test(chatId ?? '')) {
+    if (!isStickerChat(chatId)) {
       throw new Error('Invalid status recipient');
     }
     const result = await withTimeout(this.socket.sendMessage(chatId,

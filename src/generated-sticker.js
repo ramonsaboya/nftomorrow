@@ -14,15 +14,14 @@ export async function validateGeneratedSticker(buffer) {
   const image = sharp(buffer, options);
   const meta = await image.metadata();
   if (meta.format !== 'webp' || meta.width !== 512 || meta.height !== 512
-      || !meta.hasAlpha || (meta.pages ?? 1) !== 1) throw new Error('Invalid sticker format');
-  // Decode, rather than trusting headers; reject opaque and wholly blank output.
+      || (meta.pages ?? 1) !== 1) throw new Error('Invalid sticker format');
+  // Decode rather than trusting headers; opaque square artwork is valid too.
   const { data, info } = await image.ensureAlpha().raw().toBuffer({ resolveWithObject: true });
-  let transparent = false, visible = false;
+  let visible = false;
   for (let i = info.channels - 1; i < data.length; i += info.channels) {
-    transparent ||= data[i] === 0;
     visible ||= data[i] > 0;
   }
-  if (!transparent || !visible) throw new Error('Sticker must have visible artwork and transparency');
+  if (!visible) throw new Error('Sticker must have visible artwork');
   return { width: 512, height: 512, bytes: buffer.length,
     sha256: createHash('sha256').update(buffer).digest('hex') };
 }
@@ -33,11 +32,12 @@ export async function makeGeneratedSticker(buffer) {
   }
   const source = sharp(buffer, options);
   const meta = await source.metadata();
-  if (!['png', 'webp'].includes(meta.format) || !meta.hasAlpha || (meta.pages ?? 1) !== 1) {
-    throw new Error('Expected a static transparent generated image');
+  if (!['png', 'webp'].includes(meta.format) || (meta.pages ?? 1) !== 1) {
+    throw new Error('Expected a static generated image');
   }
-  const alpha = (await source.stats()).channels.at(-1);
-  if (alpha.min !== 0 || alpha.max === 0) throw new Error('Generated image lacks visible artwork or a transparent background');
+  if (meta.hasAlpha && (await source.stats()).channels.at(-1).max === 0) {
+    throw new Error('Generated image lacks visible artwork');
+  }
   const resized = await source.rotate().resize(512, 512, {
     fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 },
   }).png().toBuffer();

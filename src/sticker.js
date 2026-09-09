@@ -4,8 +4,8 @@ import { readFile } from 'node:fs/promises';
 export const STICKER_SHA256 = '17f2455288460fbc1756ad4d34322bd31d445c11bb77201f42025d0075d13a58';
 export const STICKER_URL = new URL('../assets/stickers/sticker-test.webp', import.meta.url);
 
-export function isStickerChat(jid, groupId) {
-  return typeof jid === 'string' && (jid === groupId
+export function isStickerChat(jid) {
+  return typeof jid === 'string' && (/^\d+(?:-\d+)?@g\.us$/.test(jid)
     || /^\d+@(s\.whatsapp\.net|lid)$/.test(jid));
 }
 

@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { fetchSnapshot, MAX_AGE_MS } from './prices.js';
 import { formatPrices } from './message.js';
+import { isStickerChat } from './sticker.js';
 
 // The service drains this single pending request in its main loop so shutdown
 // waits for delivery bookkeeping and requests cannot create unbounded work.
@@ -11,14 +12,15 @@ export class StatusCommand {
     this.stateKey = `status-command:${config.groupId}`;
   }
   request(id, chatId = this.config.groupId) {
-    if (!this.whatsapp.connected || this.pending || this.inFlight) return false;
+    if (!isStickerChat(chatId) || !this.whatsapp.connected || this.pending || this.inFlight) return false;
     const now = this.now();
-    const state = this.store.get(this.stateKey, { recent: [] });
-    const recent = state.recent.filter((entry) => now - entry.at <= MAX_AGE_MS);
+    const stateKey = `status-command:${chatId}`;
+    const state = this.store.get(stateKey, { recent: [] });
+    const recent = state.recent.filter((entry) => now - entry.at <= MAX_AGE_MS + 60_000);
     if ((state.lastAcceptedAt != null && now - state.lastAcceptedAt < 60_000)
         || recent.some((entry) => entry.id === id)) return false;
     // Persist acceptance before any network work. Restart never replays a reply.
-    this.store.set(this.stateKey, { lastAcceptedAt: now, recent: [...recent, { id, at: now }] });
+    this.store.set(stateKey, { lastAcceptedAt: now, recent: [...recent, { id, at: now }] });
     this.pending = { generation: this.whatsapp.generation, at: now, chatId };
     return true;
   }

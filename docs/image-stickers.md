@@ -1,59 +1,45 @@
-# GPT Image 2 reference-photo stickers
+# Dobby image stickers
 
-In the configured NFTomorrow group or a one-to-one chat with the bot, send:
+Commands work in every group Dobby has joined, without registration, and in private chats:
 
-```text
-/sticker make him a DJ wearing headphones
-```
+- `/sticker <description>`: create any artwork from the exact user prompt. No reference image, imposed caption style, cutout requirement or other creative template is added.
+- `/euvousticker <theme or scene>`: customize the original `assets/stickers/default-reference.png`. A nonempty theme/description is required. Preserve the original man, pose, framing and surroundings by default, adding themed clothing and details. Explicitly requested pose/scene changes and major creative transformations are allowed. Output has an opaque, full-frame square background.
+- For requested Eu Vou captions, default to bottom left (or another position when the composition clearly calls for it), plain readable black square sans-serif text, perfectly horizontal, without a box, outline, shadow or decoration. Only add text when requested; explicit placement and elaborate typography requests override defaults.
+- Actual mentions work too: `@Dobby sticker a dancing dragon` and `@Dobby euvousticker beach holiday, caption "Eu vou"`. Select Dobby from WhatsApp's mention picker. `/status` and `@Dobby status` return NFT prices in the same group or DM. Scheduled price alerts retain their configured destination.
 
-After validation and the daily-limit check, Dobby immediately replies once in the same chat: “Dobby’s on it 🪄 I’m making your sticker and will send it here when it’s ready. It may take a couple of minutes.” The acknowledgement quotes the command. There are no repeating progress messages. If that acknowledgement cannot be confirmed, or the connection changes while sending it, no paid image request starts.
+Dobby acknowledges accepted image work once, quoting the command, then sends a native sticker in that same chat. If acknowledgement is uncertain, no paid image request starts. The free `/sticker-test` transport diagnostic remains available.
 
-Each accepted request uploads the same original [default reference photo](../assets/stickers/default-reference.png) and the user's prompt to `gpt-image-2`. It asks for an isolated sticker with a transparent background and white outline, preserves the person's recognizable appearance, and applies the requested edit. Requests start from the source photo, not a previous result. No mask is required for whole-image prompted edits. Identity fidelity and the requested appearance still need real-output acceptance.
+## API and configuration
 
-The returned PNG is decoded, checked for genuine transparency, fitted to 512 × 512, compressed to WebP at or below 100,000 bytes, decoded again, and sent as a native quoted sticker in the originating chat. Generated artwork remains in memory and is discarded after the job; the source photo remains in the repository. The fixed robot `/sticker-test` remains available. The deployed status behavior is preserved: mention Dobby followed by `status` in the group, or send `/status` privately.
+Both image modes use `gpt-image-2.5-sunburst`, OpenAI's most capable image model as verified on 9 September 2026, with `quality=max` by default. Reference edits use multipart `POST /v1/images/edits` with the original PNG in `image[]`; freeform images use JSON `POST /v1/images/generations` with the user's prompt unchanged. Both request one 1024 × 1024 PNG; background is `opaque` for Eu Vou and `auto` for freeform. No silent fallback model is used. OpenAI's provider content rules still apply.
 
-## API choices
+Sources: [model documentation](https://developers.openai.com/api/docs/models/gpt-image-2.5-sunburst), [Image API guide](https://developers.openai.com/api/docs/guides/image-generation).
 
-- Endpoint: `POST https://api.openai.com/v1/images/edits`, multipart `image[]` containing the local PNG, and a text prompt.
-- Model: exactly `gpt-image-2`; no silent fallback to another model.
-- Output: `n=1`, `size=1024x1024`, `quality=medium`, `background=transparent`, `output_format=png`.
-- Omit `input_fidelity`: GPT Image 2 automatically uses high-fidelity image inputs and does not accept changing that setting.
-- Transparent backgrounds are a preview feature. If the API rejects the request or returns opaque/invalid artwork, the bot replies with a brief failure notice; it does not pretend that a photo with opaque background is a cutout sticker.
-
-Sources checked 8 September 2026: [GPT Image 2 model](https://developers.openai.com/api/docs/models/gpt-image-2), [image-generation guide](https://developers.openai.com/api/docs/guides/image-generation), [image-edit API reference](https://developers.openai.com/api/reference/resources/images/methods/edit). The Image API has separate usage billing. Input image/text and generated image tokens contribute to cost; consult [current pricing](https://developers.openai.com/api/docs/guides/image-generation#cost-and-latency). Supplying an API key does not itself establish model access or transparent-preview availability.
-
-## Configuration
-
-Set these in the private runtime environment, never in source or a chat message:
+Set in the private runtime environment, never in source:
 
 ```dotenv
 OPENAI_API_KEY=YOUR_PRIVATE_API_KEY
-OPENAI_IMAGE_QUALITY=medium
+OPENAI_IMAGE_QUALITY=max
 STICKER_DAILY_LIMIT=20
 ```
 
-`OPENAI_IMAGE_QUALITY` accepts `low`, `medium`, or `high`. The daily limit is an integer from 1 to 1,000 and caps attempted generations across all chats per UTC day. Failed/uncertain attempts also consume the cap. It is an attempt limit, not a guaranteed dollar budget. One-minute cooldowns apply per chat; only one image job can run or wait at a time, and additional requests are ignored.
+Quality accepts low, medium, high, xhigh, max or auto. The daily cap (1–1000) covers attempted generations across both modes and every chat per UTC day; failures count. It is an attempt cap, not a dollar budget. The Image API requires separately billed API access; a ChatGPT subscription does not supply this bot's API credentials. Existing server configuration can override the new quality default: update `OPENAI_IMAGE_QUALITY=medium` to `max` during deployment and verify access to the new model.
 
-On the existing server, edit `/etc/nftomorrow/environment` through your private SSH terminal. For example, from the Mac:
+## Reliability and validation
 
-```sh
-ssh -t -i ~/.ssh/id_ed25519_digitalocean root@165.232.43.96 \
-  'nano /etc/nftomorrow/environment'
-```
+One image request may be pending or running at once; requests share a per-chat one-minute cooldown. Jobs run asynchronously so price monitoring continues. Shutdown aborts generation and waits for bookkeeping. Requests have a three-minute deadline and bounded response/image sizes; uncertain paid work and sends are never automatically retried. Reconnection, expiry or shutdown suppress late replies. Cancellation does not guarantee cancellation of provider billing.
 
-Add the three entries above and preserve existing price-monitor settings and file permissions. Do not paste the key into Codex chat, command arguments, Git or documentation. Feature activation is a separate code-release swap; restarting the old fixed-sticker release does not add `/sticker`.
+The PNG is decoded, resized to 512 × 512 and compressed to static WebP at or below 100,000 bytes. Opaque and transparent artwork are both valid; wholly transparent, corrupt, oversized and animated images are rejected. Square opaque inputs remain full-frame opaque images. Generated images remain in memory. Logs retain only safe diagnostic fields and token counts; audits retain destination, mode, model and a prompt hash, not raw prompts, keys or images.
 
-## Reliability and operation
+Run `npm ci --include=optional` and `npm run verify` using Node.js 24. Tests mock the image provider and WhatsApp transport while performing real image conversion. Do not start a second bot with the production WhatsApp session. Deployment should run the checks on Linux and verify real output and delivery in an unregistered group and a DM.
 
-The existing single paired WhatsApp session stays on the server. Image jobs run asynchronously within that service while price checks and health heartbeats continue. SIGTERM/SIGINT or fatal service errors abort an outstanding API request and wait for its bookkeeping before closing SQLite. The API request has a three-minute deadline, bounded response/image sizes and no automatic retries. A connection change, expiry or shutdown suppresses late replies. Cancellation does not guarantee cancellation of provider billing.
+Local validation on 9 September 2026: all 96 tests and syntax checks passed on Windows with Node.js 24.21.0. Locked dependencies installed successfully. No paid API request, production WhatsApp connection or deployment was performed. POSIX file-mode assertions remain enabled on Linux; Windows does not implement those mode bits.
 
-Acceptance, a daily attempt reservation and a generation audit are committed before API work. Audit records hold a prompt hash, model and destination, without raw prompt/image/API-key contents. Image token usage is logged as counts. A separate delivery attempt commits before WhatsApp sending. Uncertain generation/delivery is never replayed after restart. Generated images and prompts are not reused as conversation history.
-
-Runtime conversion uses pinned Sharp 0.35.4, with one native worker and its cache disabled for the small host. Install with `npm ci --include=optional`, which includes its platform binaries. CI and `npm run verify` use the same locked dependencies. No OpenAI SDK, agent framework, paid background batch job or extra WhatsApp process is needed.
+The history below records earlier releases, not deployment of these changes. Recheck the live revision before deployment.
 
 ## Validation and activation
 
-Current live application revision is `3e7b216232b4b78d7920fbc924e464e62cdf946e`, activated at 16:48 UTC / 17:48 BST on 8 September 2026. This adds Dobby’s acknowledgement. All 90 tests passed locally and on Linux; WhatsApp reconnected at `16:48:53.895Z`. Rollback is `/opt/nftomorrow-before-ack-260a5e7`. The activation details below describe the earlier releases.
+Previously recorded live application revision was `3e7b216232b4b78d7920fbc924e464e62cdf946e`, activated at 16:48 UTC / 17:48 BST on 8 September 2026. This adds Dobby’s acknowledgement. All 90 tests passed locally and on Linux; WhatsApp reconnected at `16:48:53.895Z`. Rollback is `/opt/nftomorrow-before-ack-260a5e7`. The activation details below describe the earlier releases.
 
 Run `npm run verify` in this feature checkout. Tests substitute the OpenAI HTTP response and WhatsApp socket; they exercise real multipart request construction, image decoding/compression and command flows without paid API calls or using the live paired session. Linux staging tests must pass before switching the existing service.
 
