@@ -5,8 +5,13 @@ import { TARGETS } from './collections.js';
 const currencies = ['SOL', 'USD', 'GBP', 'EUR'];
 export function validateConfig(config) {
   if (!config || typeof config !== 'object' || Array.isArray(config)) throw new Error('Config must be an object');
-  const allowed = ['groupId', 'displayCurrency', 'thresholds', 'dailySummaryTime'];
+  const allowed = ['groupId', 'displayCurrency', 'thresholds', 'dailySummaryTime', 'stickerOwnerJids'];
   if (Object.keys(config).some((key) => !allowed.includes(key))) throw new Error('Unknown config option');
+  if (config.stickerOwnerJids !== undefined && (!Array.isArray(config.stickerOwnerJids)
+      || config.stickerOwnerJids.some((jid) => typeof jid !== 'string'
+        || !/^\d+@(s\.whatsapp\.net|lid)$/.test(jid)))) {
+    throw new Error('stickerOwnerJids must contain WhatsApp phone-number or LID account IDs');
+  }
   if (config.groupId != null && !/^\d+(?:-\d+)?@g\.us$/.test(config.groupId)) throw new Error('groupId must be a WhatsApp group JID');
   if (config.displayCurrency != null && !currencies.includes(config.displayCurrency)) throw new Error('displayCurrency must be SOL, USD, GBP, EUR or null');
   if (!Array.isArray(config.thresholds)) throw new Error('thresholds must be an array');

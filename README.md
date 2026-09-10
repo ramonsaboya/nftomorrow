@@ -1,8 +1,16 @@
 # nftomorrow
 
+Sticker commands require `stickerOwnerJids` in private `config.json`, containing
+the owner's international phone digits followed by `@s.whatsapp.net` and optionally
+the same account's verified `@lid` ID. Missing or empty configuration disables
+`/sticker`, `/euvousticker` and `/sticker-test`. Other senders are silently ignored
+in groups and DMs, including mention commands. See [sticker access setup](docs/image-stickers.md).
+
 Tomorrowland NFT price monitoring and Dobby WhatsApp commands, using Node.js, Baileys and SQLite. Automatic alerts go to the configured group; commands work in every group Dobby has joined and in private chats, without group registration.
 
 ## Behavior
+
+- Select up to 25 photos together in WhatsApp and add `/sticker <description>` as the caption. Dobby uses the whole album and prompt for one sticker, and confirms the photo count before generating. `/euvousticker` also accepts albums. See [photo input details](docs/image-stickers.md#using-your-own-photos).
 
 - Check all three Magic Eden collections hourly, 24/7, and once on startup or reconnection.
 - Alert when the full Medallion costs **less than 6,500 USD**, using a fresh CoinGecko SOL/USD rate. Repeat on every hourly check while below. Exactly 6,500 does not trigger. There is no recovery margin or crossing-only rule.

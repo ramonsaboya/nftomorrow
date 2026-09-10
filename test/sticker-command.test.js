@@ -17,7 +17,7 @@ const START = Date.parse('2026-09-08T12:00:00Z');
 const fixture = await loadSticker();
 
 function incoming(id = 'request-one', overrides = {}) {
-  return { key: { id, remoteJid: '123@g.us', fromMe: false, ...overrides },
+  return { key: { id, remoteJid: '123@g.us', participant: '447700900111@s.whatsapp.net', fromMe: false, ...overrides },
     message: { conversation: '/sticker-test' } };
 }
 
@@ -26,6 +26,7 @@ function harness({ path = ':memory:', start = START } = {}) {
   let now = start, fetches = 0, loads = 0;
   const stickers = [], texts = [], pings = [], logs = [];
   const config = { groupId: '123@g.us', displayCurrency: 'USD', dailySummaryTime: '18:00',
+    stickerOwnerJids: ['447700900111@s.whatsapp.net', '1234567890@lid'],
     thresholds: [{ target: 'medallion', currency: 'USD', below: 6500 }] };
   const whatsapp = { connected: true, generation: 1,
     async replyStatus(id, text) { return this.send(id, text); },

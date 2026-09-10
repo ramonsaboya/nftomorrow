@@ -1,9 +1,12 @@
 import { readFile } from 'node:fs/promises';
 import { makeGeneratedSticker } from './generated-sticker.js';
+import { MAX_INPUT_BYTES } from './sticker-input.js';
+import { MAX_STICKER_IMAGES } from './sticker-album.js';
+import { packStickerReferences } from './sticker-reference-sheets.js';
 
 export const IMAGE_MODEL = 'gpt-image-2.5-sunburst';
 export const REFERENCE_URL = new URL('../assets/stickers/default-reference.png', import.meta.url);
-export const MAX_PROMPT_LENGTH = 1000;
+export const MAX_PROMPT_LENGTH = 4000;
 const MAX_RESPONSE_BYTES = 16 * 1024 * 1024;
 const INSTRUCTIONS = 'Customize the supplied original photo using the user\'s overall theme or scene. '
   + 'Create a square, full-frame image with an opaque background, not a transparent cutout or outlined sticker. '
@@ -64,10 +67,12 @@ async function responseJson(response, maxBytes = MAX_RESPONSE_BYTES) {
 export function editReference(options) { return createImage({ ...options, mode: 'reference' }); }
 export function generateSticker(options) { return createImage({ ...options, mode: 'freeform' }); }
 
-async function createImage({ prompt, apiKey, quality = 'max', signal, mode,
+async function createImage({ prompt, apiKey, quality = 'max', signal, mode, images = [],
   fetchImpl = fetch, readReference = () => readFile(REFERENCE_URL),
-  convert = makeGeneratedSticker, timeoutMs = 180_000 }) {
+  convert = makeGeneratedSticker, timeoutMs = 240_000 }) {
   if (!apiKey) throw new ImageEditError('not_configured');
+  if (!Array.isArray(images) || images.length > MAX_STICKER_IMAGES || images.some((image) =>
+    !Buffer.isBuffer(image) || !image.length || image.length > MAX_INPUT_BYTES)) throw new ImageEditError('invalid_request');
   if (typeof prompt !== 'string' || !prompt.trim() || prompt.length > MAX_PROMPT_LENGTH
       || !['low', 'medium', 'high', 'xhigh', 'max', 'auto'].includes(quality)) throw new ImageEditError('invalid_request');
   const requestSignal = AbortSignal.any([AbortSignal.timeout(timeoutMs), ...(signal ? [signal] : [])]);
@@ -75,16 +80,29 @@ async function createImage({ prompt, apiKey, quality = 'max', signal, mode,
   let body, headers = { Authorization: `Bearer ${apiKey}` };
   const params = { model: IMAGE_MODEL, prompt: mode === 'reference' ? INSTRUCTIONS + prompt.trim() : prompt.trim(),
     n: 1, size: '1024x1024', quality, background: mode === 'reference' ? 'opaque' : 'auto', output_format: 'png' };
-  if (mode === 'reference') {
-    let reference;
-    try { reference = await readReference(); }
-    catch { throw new ImageEditError('reference_unavailable'); }
-    if (!Buffer.isBuffer(reference) || !reference.length || reference.length > 10 * 1024 * 1024) {
-      throw new ImageEditError('invalid_reference');
-    }
+  const editing = mode === 'reference' || images.length > 0;
+  if (editing) {
     const form = new FormData();
     for (const [key, value] of Object.entries(params)) form.set(key, String(value));
-    form.set('image[]', new Blob([reference], { type: 'image/png' }), 'reference.png');
+    if (mode === 'reference') {
+      let reference;
+      try { reference = await readReference(); }
+      catch { throw new ImageEditError('reference_unavailable'); }
+      if (!Buffer.isBuffer(reference) || !reference.length || reference.length > 10 * 1024 * 1024) {
+        throw new ImageEditError('invalid_reference');
+      }
+      form.append('image[]', new Blob([reference], { type: 'image/png' }), 'reference.png');
+      if (images.length) form.set('prompt', 'The first image is the original photo to customize. '
+        + 'Use the remaining images as additional references according to the user request. ' + params.prompt);
+    }
+    const references = await packStickerReferences(images, mode === 'reference' ? 15 : 16);
+    if (references !== images) form.set('prompt', form.get('prompt')
+      + '\nThe attached reference sheets contain all ' + images.length
+      + ' user photos in order, numbered Photo 1 onward, two per sheet. Use every photo as relevant to the request. '
+      + 'These are input references, not a requested output layout: do not copy the sheet borders, numbers or grid unless requested.');
+    for (const [index, image] of references.entries()) {
+      form.append('image[]', new Blob([image], { type: 'image/png' }), `attachment-${index + 1}.png`);
+    }
     body = form;
   } else {
     body = JSON.stringify(params);
@@ -93,7 +111,7 @@ async function createImage({ prompt, apiKey, quality = 'max', signal, mode,
   requestSignal.throwIfAborted();
   // One paid attempt. Never auto-retry an uncertain image-generation request.
   let response;
-  try { response = await fetchImpl(`https://api.openai.com/v1/images/${mode === 'reference' ? 'edits' : 'generations'}`, {
+  try { response = await fetchImpl(`https://api.openai.com/v1/images/${editing ? 'edits' : 'generations'}`, {
     method: 'POST', headers, body,
     signal: requestSignal, redirect: 'error',
   }); } catch {

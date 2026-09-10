@@ -4,9 +4,11 @@ import { sqliteAuth } from './auth.js';
 import { withTimeout } from './http.js';
 import { isStickerChat, validateSticker } from './sticker.js';
 import { validateGeneratedSticker } from './generated-sticker.js';
+import { StickerAlbums } from './sticker-album.js';
+import { isStickerOwner } from './sticker-access.js';
 
 export function parseCommand(content, me) {
-  const text = content?.conversation ?? content?.extendedTextMessage?.text;
+  const text = content?.conversation ?? content?.extendedTextMessage?.text ?? content?.imageMessage?.caption;
   if (typeof text !== 'string') return null;
   let commandText = text.trim();
   if (!commandText.startsWith('/')) {
@@ -14,7 +16,7 @@ export function parseCommand(content, me) {
     const match = /^@(\d+)\s+([\s\S]+)$/.exec(commandText);
     if (!match) return null;
     const identities = [me?.id, me?.lid].filter(Boolean).map(jidNormalizedUser);
-    const mentions = content?.extendedTextMessage?.contextInfo?.mentionedJid;
+    const mentions = (content?.extendedTextMessage ?? content?.imageMessage)?.contextInfo?.mentionedJid;
     if (!Array.isArray(mentions)) return null;
     const addressed = mentions.some((jid) => {
       if (typeof jid !== 'string') return false;
@@ -27,6 +29,7 @@ export function parseCommand(content, me) {
   const match = /^\/(status|sticker-test|euvousticker|sticker)(?:\s+([\s\S]*))?$/i.exec(commandText);
   if (!match) return null;
   const command = '/' + match[1].toLowerCase();
+  if (content?.imageMessage && !['/sticker', '/euvousticker'].includes(command)) return null;
   const prompt = (match[2] ?? '').trim();
   if (['/status', '/sticker-test'].includes(command) && prompt) return null;
   return { command, prompt };
@@ -34,13 +37,16 @@ export function parseCommand(content, me) {
 
 export class WhatsApp {
   constructor({ store, groupId, onFresh = () => {}, onStatus = () => {}, onCommand = () => {}, onQr,
-    now = Date.now,
+    now = Date.now, stickerOwnerJids = [],
     log = () => {}, makeSocket = makeWASocket, schedule = setTimeout, cancel = clearTimeout }) {
     Object.assign(this, { store, groupId, onFresh, onStatus, onCommand, onQr, now, log, makeSocket, schedule, cancel });
     this.connected = false;
     this.generation = 0;
     this.attempt = 0;
     this.stopped = false;
+    this.albums = new StickerAlbums({ store, now, schedule, cancel,
+      authorize: (message) => isStickerOwner(message, stickerOwnerJids),
+      emit: (...args) => { if (this.connected && !this.stopped) this.onCommand(...args); } });
   }
   async start() {
     const auth = sqliteAuth(this.store);
@@ -54,6 +60,7 @@ export class WhatsApp {
   }
   connect(auth) {
     if (this.stopped) return;
+    this.albums.clear();
     const generation = ++this.generation;
     try {
       const socket = this.makeSocket({
@@ -92,6 +99,7 @@ export class WhatsApp {
               || timestamp > this.now() + 60_000 || this.now() - timestamp > 300_000) continue;
           if (!isStickerChat(key.remoteJid)) continue;
           const parsed = parseCommand(content, auth.state.creds.me);
+          if (this.albums.accept(message, content, parsed)) continue;
           if (parsed) this.onCommand(key.id, parsed.command, message,
             ['/sticker', '/euvousticker'].includes(parsed.command) ? parsed.prompt : undefined);
         }
@@ -120,6 +128,7 @@ export class WhatsApp {
           this.onFresh();
         } else if (update.connection === 'close') {
           this.connected = false;
+          this.albums.clear();
           const code = update.lastDisconnect?.error?.output?.statusCode;
           if ([DisconnectReason.loggedOut, DisconnectReason.badSession,
             DisconnectReason.multideviceMismatch, DisconnectReason.forbidden].includes(code)) {
@@ -206,6 +215,7 @@ export class WhatsApp {
   stop() {
     if (this.stopPromise) return this.stopPromise;
     this.stopped = true;
+    this.albums.clear();
     this.connected = false;
     ++this.generation;
     this.cancel(this.timer);

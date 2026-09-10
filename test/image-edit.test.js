@@ -18,6 +18,22 @@ async function artwork({ transparent = true, blank = false, width = 128, height 
 }
 const png = await artwork();
 
+test('attached images and exact text use multipart edits; Eu Vou keeps the original first', async () => {
+  for (const generate of [generateSticker, editReference]) {
+    await generate({ prompt: 'Use these photos together', apiKey: 'test', images: [png, png],
+      fetchImpl: async (url, options) => {
+        assert.equal(url, 'https://api.openai.com/v1/images/edits');
+        assert.equal(options.headers['Content-Type'], undefined);
+        const files = options.body.getAll('image[]');
+        assert.equal(files.length, generate === editReference ? 3 : 2);
+        assert.deepEqual(Buffer.from(await files.at(-1).arrayBuffer()), png);
+        if (generate === generateSticker) assert.equal(options.body.get('prompt'), 'Use these photos together');
+        else assert.deepEqual(Buffer.from(await files[0].arrayBuffer()), await readFile(REFERENCE_URL));
+        return Response.json({ data: [{ b64_json: png.toString('base64') }] });
+      } });
+  }
+});
+
 test('freeform generation sends the exact user prompt without a reference or style instructions', async () => {
   const prompt = 'A purple dragon, wildly creative, caption OLÁ in ornate gold lettering';
   const result = await generateSticker({ prompt, apiKey: 'test',
@@ -104,7 +120,7 @@ test('missing key, bad prompt, missing reference and pre-aborted work never call
   let calls = 0;
   const base = { prompt: 'Edit', apiKey: 'test', readReference: async () => png,
     fetchImpl: async () => { calls++; throw new Error('unexpected'); } };
-  for (const changes of [{ apiKey: '' }, { prompt: '' }, { prompt: 'a'.repeat(1001) },
+  for (const changes of [{ apiKey: '' }, { prompt: '' }, { prompt: 'a'.repeat(4001) },
     { quality: 'invalid' }, { readReference: async () => { throw new Error('private filepath'); } },
     { signal: AbortSignal.abort() }]) await assert.rejects(editReference({ ...base, ...changes }));
   assert.equal(calls, 0);

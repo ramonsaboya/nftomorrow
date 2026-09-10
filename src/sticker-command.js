@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { MAX_AGE_MS } from './prices.js';
 import { isStickerChat, loadSticker, validateSticker } from './sticker.js';
+import { isStickerOwner } from './sticker-access.js';
 
 // Drained in the monitor loop: one bounded request, with durable acceptance
 // before sending and no replay after restart, reconnect or uncertain delivery.
@@ -11,6 +12,7 @@ export class StickerCommand {
     this.stateKey = `${statePrefix}:${config.groupId}`;
   }
   request(id, message) {
+    if (!isStickerOwner(message, this.config.stickerOwnerJids)) return false;
     const chatId = message?.key?.remoteJid;
     if (typeof id !== 'string' || !id || message?.key?.id !== id
         || !isStickerChat(chatId, this.config.groupId) || message.key.fromMe

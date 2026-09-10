@@ -1,5 +1,6 @@
 {
   "groupId": null,
+  "stickerOwnerJids": [],
   "displayCurrency": "USD",
   "dailySummaryTime": "18:00",
   "thresholds": []

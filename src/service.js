@@ -33,7 +33,7 @@ try {
   const health = new Health(healthUrls, { log });
   let forceCheck = true;
   let statusCommand, stickerCommand, imageCommand;
-  whatsapp = new WhatsApp({ store, groupId: config.groupId, log,
+  whatsapp = new WhatsApp({ store, groupId: config.groupId, log, stickerOwnerJids: config.stickerOwnerJids,
     onCommand: (id, command, message, prompt) => {
       if (command === '/status') statusCommand.request(id, message.key.remoteJid);
       else if (command === '/sticker-test') stickerCommand.request(id, message);
@@ -57,6 +57,7 @@ try {
   imageCommand = new ImageStickerCommand({ config, store, whatsapp, health, log,
     ...imageStickers, signal: wake.signal });
   if (!imageStickers.apiKey) log('image_stickers_unconfigured');
+  if (!config.stickerOwnerJids?.length) log('sticker_owner_unconfigured');
   const missingChecks = ['process', 'prices', 'whatsapp'].filter((name) => !healthUrls[name]);
   if (missingChecks.length) log('email_monitoring_unconfigured', { checks: missingChecks });
   log('monitor_started', { dailySummaryTime: config.dailySummaryTime, timezone: 'Europe/London', polling: 'hourly' });

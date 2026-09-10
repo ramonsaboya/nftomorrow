@@ -9,5 +9,6 @@ backups/
 *.db*
 *.log
 *.tgz
+*.tar.gz
 .DS_Store
 coverage/

@@ -10,14 +10,48 @@ import { COLLECTIONS } from '../src/collections.js';
 import { ImageEditError } from '../src/image-edit.js';
 
 const sticker = await readFile(new URL('../assets/stickers/sticker-test.webp', import.meta.url));
-const incoming = (id = 'request', chat = '123@g.us') => ({ key: { id, remoteJid: chat },
+const incoming = (id = 'request', chat = '123@g.us') => ({ key: { id, remoteJid: chat, participant: '447700900111@s.whatsapp.net' },
   message: { conversation: '/sticker make him a DJ' } });
+
+test('image inputs reach generation and failed downloads do not consume budget', async () => {
+  const images = [Buffer.from('prepared image')];
+  const h = harness({ loadImages: async () => images, generate: async (args) => {
+    assert.equal(args.images, images);
+    assert.equal(args.prompt, 'Make him a DJ');
+    return { sticker, usage: {} };
+  } });
+  try {
+    h.command.request('request', incoming(), 'Make him a DJ');
+    await h.command.runPending();
+    assert.equal(h.sends.length, 1);
+    h.advance(60_000);
+    h.command.loadImages = async () => { throw new Error('private download detail'); };
+    h.command.request('failed', incoming('failed'), 'Make him a DJ');
+    await h.command.runPending();
+    assert.equal(h.store.get('image-sticker-budget').used, 1);
+    assert.match(h.notices.at(-1).text, /could not read that photo/);
+    assert.equal(h.acknowledgements.length, 1);
+  } finally { h.store.close(); }
+});
+
+test('unauthorized senders cannot trigger photo downloads', async () => {
+  let downloads = 0;
+  const h = harness({ loadImages: async () => { downloads++; return []; } });
+  try {
+    const msg = incoming();
+    msg.key.participant = '999@s.whatsapp.net';
+    assert.equal(h.command.request('request', msg, 'Make him a DJ'), false);
+    await h.command.runPending();
+    assert.equal(downloads, 0);
+  } finally { h.store.close(); }
+});
 function harness(overrides = {}) {
   const store = new Store(':memory:');
   const sends = [], notices = [], acknowledgements = [], logs = [];
   let now = Date.parse('2026-09-08T12:00:00Z'), calls = 0;
   const controller = new AbortController();
   const config = { groupId: '123@g.us', displayCurrency: 'USD', dailySummaryTime: '18:00',
+    stickerOwnerJids: ['447700900111@s.whatsapp.net', '456@lid'],
     thresholds: [{ target: 'medallion', currency: 'USD', below: 6500 }] };
   const whatsapp = { connected: true, generation: 1,
     async sendGeneratedSticker(id, buffer, quote) {
@@ -92,7 +126,7 @@ test('image prompts reserve paid work durably, then send a validated quoted stic
 });
 
 test('empty/oversized prompts and an absent API key get a reply without paid work', async () => {
-  for (const [apiKey, prompt] of [['test', ''], ['test', 'x'.repeat(1001)], ['', 'Make him a DJ']]) {
+  for (const [apiKey, prompt] of [['test', ''], ['test', 'x'.repeat(4001)], ['', 'Make him a DJ']]) {
     const h = harness({ apiKey });
     try {
       h.command.request('request', incoming(), prompt); await h.command.runPending();
@@ -238,7 +272,7 @@ test('disconnect, reconnect, expiry and shutdown suppress late image replies', a
       h.command.generate = async () => {
         if (reason === 'disconnect') h.whatsapp.connected = false;
         if (reason === 'reconnect') h.whatsapp.generation++;
-        if (reason === 'expiry') h.advance(300_001);
+        if (reason === 'expiry') h.advance(420_001);
         if (reason === 'shutdown') h.controller.abort();
         return { sticker, usage: {} };
       };
@@ -277,13 +311,14 @@ test('real command intake preserves prompts and replies to their group/DM while 
       message('dm', '456@lid', '/sticker Wear a RED hat'),
       message('other', '999@g.us', '/sticker ignored'), message('ordinary', '123@g.us', 'hello'),
       message('prefix', '123@g.us', '/stickers nope'), message('price-dm', '456@lid', '/status'),
+      { ...message('photo', '789@s.whatsapp.net', ''), message: { imageMessage: { caption: '/sticker Photo wizard' } } },
     ] });
-    assert.equal(commands.length, 4);
+    assert.equal(commands.length, 5);
     assert.equal(commands[3][1], '/status');
     const imageCommands = commands.filter((c) => c[1] === '/sticker');
-    assert.deepEqual(imageCommands.map((c) => c[3]), ['Make him a DJ', 'Wear a RED hat', 'ignored']);
+    assert.deepEqual(imageCommands.map((c) => c[3]), ['Make him a DJ', 'Wear a RED hat', 'ignored', 'Photo wizard']);
     for (const command of imageCommands) await wa.sendGeneratedSticker(command[0], sticker, command[2]);
-    assert.deepEqual(sends.map((s) => s.chat), ['123@g.us', '456@lid', '999@g.us']);
+    assert.deepEqual(sends.map((s) => s.chat), ['123@g.us', '456@lid', '999@g.us', '789@s.whatsapp.net']);
     await wa.replyText('notice', 'Try again', commands[1][2]);
     assert.equal(sends.at(-1).chat, '456@lid');
     await wa.send('price', 'Prices'); assert.equal(sends.at(-1).chat, '123@g.us');
