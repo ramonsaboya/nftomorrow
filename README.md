@@ -103,3 +103,5 @@ HTTP requests have timeouts and bounded retries. WhatsApp reconnects with capped
 The service uses an OS-managed SQLite lock to exclude another process sharing the data directory. SIGTERM stops sending, finishes active bookkeeping, closes the socket with a short grace period, closes SQLite and releases the lock before exiting. Journald provides bounded logs on the deployed host. Price history retains approximately one year; delivery audit is retained separately.
 
 Optional Healthchecks.io pings report process liveness, price failures and WhatsApp health. Email notifications require the three ping URLs and verified email integrations. **Email setup was deferred by the user until after deployment.** See [operations and restore instructions](docs/operations.md) and [validation and remaining checks](docs/validation.md).
+
+Generated stickers support plain replies for changes: reply to a sticker with a request such as 'Make the hat red'. Original photos, prompts, sticker versions and edits are saved privately in SQLite for later revisions. This applies to stickers generated after deployment of this feature. See [image sticker instructions](docs/image-stickers.md).

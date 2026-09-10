@@ -14,6 +14,45 @@ const sticker = await readFile(new URL('../assets/stickers/sticker-test.webp', i
 const incoming = (id = 'request', chat = '123@g.us') => ({ key: { id, remoteJid: chat, participant: '447700900111@s.whatsapp.net' },
   message: { conversation: '/sticker make him a DJ' } });
 
+test('plain replies preserve sources across handlers, successive edits and branches', async () => {
+  const seen = [], images = [Buffer.from('original photo')];
+  const h = harness({ loadImages: async () => images, generate: async (args) => {
+    seen.push(args); return { sticker, usage: {} };
+  } });
+  const reply = (id, target, chat) => ({ ...incoming(id, chat), message: { extendedTextMessage: {
+    text: 'Make the hat red', contextInfo: { stanzaId: target },
+  } } });
+  try {
+    h.command.request('request', incoming(), 'Make him a DJ'); await h.command.runPending();
+    const original = h.sends[0].id;
+    h.advance(60_000);
+    h.command = new ImageStickerCommand(h.dependencies);
+    h.command.loadImages = async () => { throw new Error('Must reuse saved photos'); };
+    assert.equal(h.command.requestRevision('wrong-chat', reply('wrong-chat', original, '999@g.us'), 'Red hat'), false);
+    assert.equal(h.command.requestRevision('unknown', reply('unknown', 'unknown'), 'Red hat'), false);
+    const unauthorized = reply('unauthorized', original);
+    unauthorized.key.participant = '999@s.whatsapp.net';
+    assert.equal(h.command.requestRevision('unauthorized', unauthorized, 'Red hat'), false);
+    assert.equal(h.command.requestRevision('edit', reply('edit', original), 'Make the hat red'), true);
+    await h.command.runPending();
+    assert.equal(seen[1].revision.originalPrompt, 'Make him a DJ');
+    assert.deepEqual(seen[1].revision.sticker, sticker);
+    assert.deepEqual(seen[1].images, images);
+    assert.deepEqual(seen[1].revision.edits, []);
+    h.advance(60_000);
+    h.command.requestRevision('edit2', reply('edit2', h.sends[1].id), 'Bigger hat');
+    await h.command.runPending();
+    assert.deepEqual(seen[2].revision.edits, ['Make the hat red']);
+    h.advance(60_000);
+    h.command.requestRevision('branch', reply('branch', original), 'Blue hat');
+    await h.command.runPending();
+    assert.deepEqual(seen[3].revision.edits, []);
+    assert.equal(h.store.get('image-sticker-budget').used, 4);
+    assert.equal(h.store.db.prepare('SELECT COUNT(*) AS n FROM sticker_sources').get().n, 1);
+    assert.equal(h.command.requestRevision('branch', reply('branch', original), 'Blue hat'), false);
+  } finally { h.store.close(); }
+});
+
 test('animated and GIF flags reach generation for both modes with shared budget and an animated acknowledgement', async () => {
   const frames = Buffer.alloc(512 * 1024 * 3, 50);
   frames.fill(200, 512 * 512 * 3);

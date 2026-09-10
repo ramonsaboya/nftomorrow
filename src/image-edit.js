@@ -3,6 +3,7 @@ import { makeGeneratedSticker, makeAnimatedSticker, ANIMATION_GRID, ANIMATION_FR
 import { MAX_INPUT_BYTES } from './sticker-input.js';
 import { MAX_STICKER_IMAGES } from './sticker-album.js';
 import { packStickerReferences } from './sticker-reference-sheets.js';
+import sharp from 'sharp';
 
 export const IMAGE_MODEL = 'gpt-image-2.5-sunburst';
 export const REFERENCE_URL = new URL('../assets/stickers/default-reference.png', import.meta.url);
@@ -76,6 +77,7 @@ export function editReference(options) { return createImage({ ...options, mode: 
 export function generateSticker(options) { return createImage({ ...options, mode: 'freeform' }); }
 
 async function createImage({ prompt, apiKey, quality = 'max', signal, mode, images = [], animated = false,
+  revision, referenceImage,
   fetchImpl = fetch, readReference = () => readFile(REFERENCE_URL),
   convert = animated ? makeAnimatedSticker : makeGeneratedSticker, timeoutMs = 240_000 }) {
   if (!apiKey) throw new ImageEditError('not_configured');
@@ -89,22 +91,39 @@ async function createImage({ prompt, apiKey, quality = 'max', signal, mode, imag
   const params = { model: IMAGE_MODEL, prompt: mode === 'reference' ? INSTRUCTIONS + prompt.trim() : prompt.trim(),
     n: 1, size: '1024x1024', quality, background: mode === 'reference' ? 'opaque' : 'auto', output_format: 'png' };
   if (animated) params.prompt = ANIMATION_INSTRUCTIONS + params.prompt;
-  const editing = mode === 'reference' || images.length > 0;
+  if (revision) params.prompt = (animated ? ANIMATION_INSTRUCTIONS : '')
+    + 'Edit the supplied current sticker. Preserve its identity, composition and all details unless the latest request changes them. '
+    + 'Use the original photos for identity and details, and the original prompt and earlier edits as context. '
+    + 'The latest request takes precedence over earlier instructions. '
+    + (animated ? 'The current sticker image shows its first frame; preserve the requested motion while applying the edit. ' : '')
+    + '\nOriginal prompt: ' + revision.originalPrompt
+    + '\nEarlier edits in order: ' + JSON.stringify(revision.edits)
+    + '\nLatest change request: ' + prompt.trim();
+  const editing = mode === 'reference' || images.length > 0 || Boolean(revision);
   if (editing) {
     const form = new FormData();
     for (const [key, value] of Object.entries(params)) form.set(key, String(value));
     if (mode === 'reference') {
       let reference;
-      try { reference = await readReference(); }
+      try { reference = referenceImage ?? await readReference(); }
       catch { throw new ImageEditError('reference_unavailable'); }
       if (!Buffer.isBuffer(reference) || !reference.length || reference.length > 10 * 1024 * 1024) {
         throw new ImageEditError('invalid_reference');
       }
       form.append('image[]', new Blob([reference], { type: 'image/png' }), 'reference.png');
-      if (images.length) form.set('prompt', 'The first image is the original photo to customize. '
+      referenceImage = reference;
+      if (images.length && !revision) form.set('prompt', 'The first image is the original photo to customize. '
         + 'Use the remaining images as additional references according to the user request. ' + params.prompt);
     }
-    const references = await packStickerReferences(images, mode === 'reference' ? 15 : 16);
+    if (revision) {
+      const current = await sharp(revision.sticker, { limitInputPixels: 4_194_304 }).png().toBuffer();
+      form.append('image[]', new Blob([current], { type: 'image/png' }), 'current-sticker.png');
+      form.set('prompt', (mode === 'reference'
+        ? 'Image 1 is the original Eu Vou photo. Image 2 is the current sticker to edit. '
+        : 'Image 1 is the current sticker to edit. ')
+        + 'Remaining images are the original user photos. ' + params.prompt);
+    }
+    const references = await packStickerReferences(images, 16 - (mode === 'reference' ? 1 : 0) - (revision ? 1 : 0));
     if (references !== images) form.set('prompt', form.get('prompt')
       + '\nThe attached reference sheets contain all ' + images.length
       + ' user photos in order, numbered Photo 1 onward, two per sheet. Use every photo as relevant to the request. '
@@ -154,5 +173,5 @@ async function createImage({ prompt, apiKey, quality = 'max', signal, mode, imag
   for (const key of ['input_tokens', 'output_tokens', 'total_tokens']) {
     if (Number.isSafeInteger(json.usage?.[key]) && json.usage[key] >= 0) usage[key] = json.usage[key];
   }
-  return { sticker, usage };
+  return { sticker, usage, referenceImage };
 }

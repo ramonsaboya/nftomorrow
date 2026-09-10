@@ -7,6 +7,31 @@ import { Store } from '../src/store.js';
 import { sqliteAuth } from '../src/auth.js';
 import { WhatsApp, parseCommand } from '../src/whatsapp.js';
 
+test('fresh plain replies route only for saved stickers in the same chat', async () => {
+  const now = 1_800_000_000_000, commands = [];
+  const h = harness({ now: () => now, onCommand: (...args) => commands.push(args) });
+  try {
+    h.store.saveSticker('generated', '12345@g.us', { source: {}, sticker: Buffer.from('saved') });
+    await h.wa.start();
+    const socket = h.sockets[0];
+    socket.ev.emit('connection.update', { connection: 'open' });
+    const reply = (id, target = 'generated', chat = '12345@g.us', text = 'Make it red') => ({
+      key: { id, remoteJid: chat }, messageTimestamp: now / 1000,
+      message: { ephemeralMessage: { message: { extendedTextMessage: {
+        text, contextInfo: { stanzaId: target },
+      } } } },
+    });
+    socket.ev.emit('messages.upsert', { type: 'notify', messages: [
+      reply('valid'), reply('unknown', 'other'), reply('other-chat', 'generated', '999@g.us'),
+      reply('empty', 'generated', '12345@g.us', '  '),
+      { ...reply('stale'), messageTimestamp: now / 1000 - 1 },
+    ] });
+    assert.equal(commands.length, 1);
+    assert.equal(commands[0][1], 'sticker-revision');
+    assert.equal(commands[0][3], 'Make it red');
+  } finally { await h.wa.stop(); h.store.close(); }
+});
+
 test('all commands accept slash or verified Dobby mentions and preserve theme and caption case', () => {
   const me = { id: '123:1@s.whatsapp.net', lid: '456:2@lid' };
   for (const name of ['status', 'sticker', 'euvousticker', 'sticker-test']) {

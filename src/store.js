@@ -21,6 +21,11 @@ export class Store {
         id TEXT PRIMARY KEY, created_at INTEGER NOT NULL, status TEXT NOT NULL,
         data TEXT NOT NULL, finished_at INTEGER
       );
+      CREATE TABLE IF NOT EXISTS sticker_sources (id TEXT PRIMARY KEY, data TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS sticker_versions (
+        id TEXT PRIMARY KEY, chat_id TEXT NOT NULL, source_id TEXT NOT NULL,
+        edits TEXT NOT NULL, sticker BLOB NOT NULL
+      );
     `);
   }
   transaction(fn) {
@@ -57,4 +62,22 @@ export class Store {
       .map((row) => ({ ...row, data: JSON.parse(row.data) }));
   }
   close() { this.db.close(); }
+  saveSticker(id, chatId, { sourceId = id, source, edits = [], sticker }) {
+    this.transaction(() => {
+      if (source) this.db.prepare('INSERT INTO sticker_sources VALUES (?, ?)')
+        .run(sourceId, JSON.stringify(source));
+      this.db.prepare('INSERT INTO sticker_versions VALUES (?, ?, ?, ?, ?)')
+        .run(id, chatId, sourceId, JSON.stringify(edits), sticker);
+    });
+  }
+  hasSticker(id, chatId) {
+    return typeof id === 'string' && typeof chatId === 'string'
+      && Boolean(this.db.prepare('SELECT 1 FROM sticker_versions WHERE id = ? AND chat_id = ?').get(id, chatId));
+  }
+  stickerContext(id, chatId) {
+    const row = this.db.prepare(`SELECT v.*, s.data FROM sticker_versions v
+      JOIN sticker_sources s ON s.id = v.source_id WHERE v.id = ? AND v.chat_id = ?`).get(id, chatId);
+    return row ? { sourceId: row.source_id, source: JSON.parse(row.data),
+      edits: JSON.parse(row.edits), sticker: Buffer.from(row.sticker) } : null;
+  }
 }

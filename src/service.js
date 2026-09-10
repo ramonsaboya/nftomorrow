@@ -39,6 +39,7 @@ try {
       else if (command === '/sticker-test') stickerCommand.request(id, message);
       else if (command === '/sticker') imageCommand.request(id, message, prompt);
       else if (command === '/euvousticker') imageCommand.request(id, message, prompt, 'reference');
+      else if (command === 'sticker-revision') imageCommand.requestRevision(id, message, prompt);
     },
     onFresh: () => { forceCheck = true; },
     onStatus: (status) => {

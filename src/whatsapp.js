@@ -102,6 +102,13 @@ export class WhatsApp {
           if (this.albums.accept(message, content, parsed)) continue;
           if (parsed) this.onCommand(key.id, parsed.command, message,
             ['/sticker', '/euvousticker'].includes(parsed.command) ? parsed.prompt : undefined);
+          else {
+            const reply = content?.extendedTextMessage;
+            if (typeof reply?.text === 'string' && reply.text.trim()
+                && this.store.hasSticker(reply.contextInfo?.stanzaId, key.remoteJid)) {
+              this.onCommand(key.id, 'sticker-revision', message, reply.text.trim());
+            }
+          }
         }
       });
       socket.ev.on('creds.update', () => {

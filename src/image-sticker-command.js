@@ -4,6 +4,7 @@ import { editReference, generateSticker, imageErrorDetails, IMAGE_MODEL, MAX_PRO
 import { validateGeneratedSticker } from './generated-sticker.js';
 import { loadStickerInputs } from './sticker-input.js';
 import { STICKER_BATCH } from './sticker-album.js';
+import { normalizeMessageContent } from '@whiskeysockets/baileys';
 
 const messageId = () => `3EB0${randomBytes(14).toString('hex').toUpperCase()}`;
 
@@ -37,6 +38,15 @@ export class ImageStickerCommand extends StickerCommand {
       && this.whatsapp.generation === request.generation
       && this.now() - request.at <= 420_000;
   }
+  requestRevision(id, message, prompt) {
+    const quotedId = normalizeMessageContent(message?.message)?.extendedTextMessage?.contextInfo?.stanzaId;
+    if (typeof prompt !== 'string' || !prompt.trim() || this.signal?.aborted
+        || !this.store.hasSticker(quotedId, message?.key?.remoteJid)
+        || !super.request(id, message)) return false;
+    this.pending.prompt = prompt.trim();
+    this.pending.revisionId = quotedId;
+    return true;
+  }
   async deliver(request, kind, send, data = {}) {
     if (!this.available(request)) return false;
     const id = messageId();
@@ -65,6 +75,12 @@ export class ImageStickerCommand extends StickerCommand {
   }
   async reply(request) {
     if (!this.available(request)) return;
+    const context = request.revisionId ? this.store.stickerContext(request.revisionId, request.chatId) : null;
+    if (request.revisionId && !context) return;
+    if (context) {
+      request.mode = context.source.mode;
+      request.animated = context.source.animated;
+    }
     const batchError = request.message[STICKER_BATCH]?.error;
     if (batchError) {
       await this.note(request, batchError === 'album_size'
@@ -92,7 +108,8 @@ export class ImageStickerCommand extends StickerCommand {
       return;
     }
     let images;
-    try { images = await this.loadImages(request.message, { signal: this.signal }); }
+    try { images = context ? context.source.images.map((image) => Buffer.from(image, 'base64'))
+      : await this.loadImages(request.message, { signal: this.signal }); }
     catch {
       await this.note(request, 'I could not read that photo or complete photo set. Please resend up to 25 static JPEG, PNG or WebP photos under 20 MB each with /sticker and your description in the caption. Try smaller photos if the set is large. No AI generation was started.');
       return;
@@ -100,7 +117,8 @@ export class ImageStickerCommand extends StickerCommand {
     if (!this.available(request)) return;
     const acknowledged = await this.deliver(request, 'sticker-processing',
       (id) => this.whatsapp.replyText(id,
-        `Dobby’s on it 🪄 I’m making your ${request.animated ? 'animated ' : ''}sticker${images.length ? ` using ${images.length} photo${images.length === 1 ? '' : 's'}` : ''} and will send it here when it’s ready. It may take a couple of minutes.`,
+        context ? 'Dobby’s on it 🪄 I’m updating that sticker using its original photos, prompt and previous edits. It may take a couple of minutes.'
+          : `Dobby’s on it 🪄 I’m making your ${request.animated ? 'animated ' : ''}sticker${images.length ? ` using ${images.length} photo${images.length === 1 ? '' : 's'}` : ''} and will send it here when it’s ready. It may take a couple of minutes.`,
         request.message));
     if (!acknowledged || !this.available(request)) return;
     // The acknowledgement can cross midnight; reserve against the generation day.
@@ -119,7 +137,9 @@ export class ImageStickerCommand extends StickerCommand {
     let stage = request.mode === 'reference' || images.length ? 'image_edit' : 'image_generation';
     try {
       result = await this.generate({ prompt: request.prompt, apiKey: this.apiKey, mode: request.mode,
-        quality: this.quality, signal: this.signal, images, animated: request.animated });
+        quality: this.quality, signal: this.signal, images, animated: request.animated,
+        revision: context ? { originalPrompt: context.source.prompt, edits: context.edits, sticker: context.sticker } : undefined,
+        referenceImage: context?.source.referenceImage ? Buffer.from(context.source.referenceImage, 'base64') : undefined });
       stage = 'sticker_validation';
       asset = await validateGeneratedSticker(result.sticker, { requireAnimated: request.animated });
       this.store.finish(jobId, 'generated', this.now());
@@ -135,7 +155,15 @@ export class ImageStickerCommand extends StickerCommand {
       return;
     }
     await this.deliver(request, 'sticker-image',
-      (id) => this.whatsapp.sendGeneratedSticker(id, result.sticker, request.message),
+      (id) => {
+        // Persist before the send: even an uncertain delivery may reach WhatsApp.
+        this.store.saveSticker(id, request.chatId, { sticker: result.sticker,
+          ...(context ? { sourceId: context.sourceId, edits: [...context.edits, request.prompt] }
+            : { source: { prompt: request.prompt, mode: request.mode, animated: request.animated,
+              images: images.map((image) => image.toString('base64')),
+              referenceImage: result.referenceImage?.toString('base64') } }) });
+        return this.whatsapp.sendGeneratedSticker(id, result.sticker, request.message);
+      },
       { model: IMAGE_MODEL, sha256: asset.sha256, generationId: jobId });
   }
 }

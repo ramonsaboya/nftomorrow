@@ -18,6 +18,28 @@ async function artwork({ transparent = true, blank = false, width = 128, height 
 }
 const png = await artwork();
 
+test('revisions upload the current sticker and original photos with ordered edit context', async () => {
+  const sticker = await makeGeneratedSticker(png);
+  for (const generate of [generateSticker, editReference]) {
+    await generate({ prompt: 'Make the hat red', apiKey: 'test', images: [png],
+      referenceImage: png,
+      readReference: () => { throw new Error('Must use the saved original'); },
+      revision: { originalPrompt: 'A DJ', edits: ['Add a hat'], sticker },
+      fetchImpl: async (url, options) => {
+        assert.match(url, /\/edits$/);
+        const files = options.body.getAll('image[]');
+        assert.equal(files.length, generate === editReference ? 3 : 2);
+        assert.equal(files.at(-2).name, 'current-sticker.png');
+        assert.deepEqual(Buffer.from(await files.at(-1).arrayBuffer()), png);
+        const prompt = options.body.get('prompt');
+        assert.match(prompt, /Original prompt: A DJ/);
+        assert.match(prompt, /Earlier edits in order: \["Add a hat"\]/);
+        assert.match(prompt, /Latest change request: Make the hat red/);
+        return Response.json({ data: [{ b64_json: png.toString('base64') }] });
+      } });
+  }
+});
+
 test('attached images and exact text use multipart edits; Eu Vou keeps the original first', async () => {
   for (const generate of [generateSticker, editReference]) {
     await generate({ prompt: 'Use these photos together', apiKey: 'test', images: [png, png],
