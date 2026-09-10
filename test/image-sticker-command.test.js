@@ -8,10 +8,68 @@ import { WhatsApp } from '../src/whatsapp.js';
 import { Monitor } from '../src/monitor.js';
 import { COLLECTIONS } from '../src/collections.js';
 import { ImageEditError } from '../src/image-edit.js';
+import sharp from 'sharp';
 
 const sticker = await readFile(new URL('../assets/stickers/sticker-test.webp', import.meta.url));
 const incoming = (id = 'request', chat = '123@g.us') => ({ key: { id, remoteJid: chat, participant: '447700900111@s.whatsapp.net' },
   message: { conversation: '/sticker make him a DJ' } });
+
+test('animated and GIF flags reach generation for both modes with shared budget and an animated acknowledgement', async () => {
+  const frames = Buffer.alloc(512 * 1024 * 3, 50);
+  frames.fill(200, 512 * 512 * 3);
+  const animation = await sharp(frames, { raw: { width: 512, height: 1024, channels: 3, pageHeight: 512 } })
+    .webp({ loop: 0, delay: [125, 125] }).toBuffer();
+  const seen = [];
+  const images = [Buffer.from('prepared photo')];
+  const h = harness({ loadImages: async () => images, generate: async (args) => {
+    seen.push(args); return { sticker: animation, usage: {} };
+  } });
+  try {
+    for (const [index, mode] of ['freeform', 'reference'].entries()) {
+      const flag = index ? '--GIF' : '--animated';
+      h.command.request('animation-' + index, incoming('animation-' + index), `${flag} Make him a DJ`, mode);
+      await h.command.runPending(); h.advance(60_000);
+      assert.equal(seen[index].animated, true); assert.equal(seen[index].mode, mode);
+      assert.equal(seen[index].prompt, 'Make him a DJ'); assert.equal(seen[index].images, images);
+      assert.match(h.acknowledgements[index].text, /animated sticker using 1 photo/);
+      assert.deepEqual(h.sends[index].buffer, animation);
+    }
+    assert.equal(h.store.get('image-sticker-budget').used, 2);
+    assert.equal(h.store.deliveries().filter((row) => row.data.kind === 'sticker-generation')
+      .every((row) => row.data.animated === true), true);
+  } finally { h.store.close(); }
+});
+
+test('an animation flag needs a description and never silently accepts a static result', async () => {
+  for (const prompt of ['--animated', '--gif  ', '--animated ' + 'x'.repeat(4001)]) {
+    const h = harness();
+    try {
+      h.command.request('request', incoming(), prompt); await h.command.runPending();
+      assert.equal(h.calls(), 0); assert.equal(h.sends.length, 0);
+      assert.match(h.notices[0].text, /description/);
+      assert.equal(h.store.get('image-sticker-budget'), null);
+    } finally { h.store.close(); }
+  }
+  const h = harness();
+  try {
+    h.command.request('request', incoming(), '--animated Make him a DJ'); await h.command.runPending();
+    assert.equal(h.calls(), 1); assert.equal(h.sends.length, 0);
+    assert.equal(h.notices.length, 1);
+    assert.equal(h.store.get('image-sticker-budget').used, 1);
+  } finally { h.store.close(); }
+});
+
+test('animation words inside ordinary prompts do not change the output mode', async () => {
+  const seen = [];
+  const h = harness({ generate: async (args) => { seen.push(args); return { sticker, usage: {} }; } });
+  try {
+    for (const [index, prompt] of ['an animated film poster', 'a sign saying --gif', '--gift a dragon'].entries()) {
+      h.command.request('plain-' + index, incoming('plain-' + index), prompt);
+      await h.command.runPending(); h.advance(60_000);
+      assert.equal(seen[index].animated, false); assert.equal(seen[index].prompt, prompt);
+    }
+  } finally { h.store.close(); }
+});
 
 test('image inputs reach generation and failed downloads do not consume budget', async () => {
   const images = [Buffer.from('prepared image')];

@@ -1,5 +1,5 @@
 import { readFile } from 'node:fs/promises';
-import { makeGeneratedSticker } from './generated-sticker.js';
+import { makeGeneratedSticker, makeAnimatedSticker, ANIMATION_GRID, ANIMATION_FRAMES } from './generated-sticker.js';
 import { MAX_INPUT_BYTES } from './sticker-input.js';
 import { MAX_STICKER_IMAGES } from './sticker-album.js';
 import { packStickerReferences } from './sticker-reference-sheets.js';
@@ -8,6 +8,14 @@ export const IMAGE_MODEL = 'gpt-image-2.5-sunburst';
 export const REFERENCE_URL = new URL('../assets/stickers/default-reference.png', import.meta.url);
 export const MAX_PROMPT_LENGTH = 4000;
 const MAX_RESPONSE_BYTES = 16 * 1024 * 1024;
+const ANIMATION_INSTRUCTIONS = `Create a sprite sheet for a seamless two-second looping animated sticker. `
+  + `Output exactly ${ANIMATION_FRAMES} consecutive animation frames in a ${ANIMATION_GRID} by ${ANIMATION_GRID} grid on a 1024x1024 canvas. `
+  + 'Each cell is exactly 256x256 pixels; frames run left-to-right, then top-to-bottom. '
+  + 'No gutters, margins, borders, panel labels or frame numbers. Each cell contains the entire scene, '
+  + 'with consistent subject identity, scale, camera, lighting and background. Animate the requested motion '
+  + 'in small successive steps, with a smooth transition from the last frame back to the first. '
+  + 'The first frame must be complete and readable as a standalone sticker. Keep requested captions fixed across frames. '
+  + 'Apply the following creative instructions separately to every frame, not to the overall sheet. ';
 const INSTRUCTIONS = 'Customize the supplied original photo using the user\'s overall theme or scene. '
   + 'Create a square, full-frame image with an opaque background, not a transparent cutout or outlined sticker. '
   + 'By default stay very close to the original: preserve the man\'s facial identity, appearance, pose, framing, '
@@ -67,19 +75,20 @@ async function responseJson(response, maxBytes = MAX_RESPONSE_BYTES) {
 export function editReference(options) { return createImage({ ...options, mode: 'reference' }); }
 export function generateSticker(options) { return createImage({ ...options, mode: 'freeform' }); }
 
-async function createImage({ prompt, apiKey, quality = 'max', signal, mode, images = [],
+async function createImage({ prompt, apiKey, quality = 'max', signal, mode, images = [], animated = false,
   fetchImpl = fetch, readReference = () => readFile(REFERENCE_URL),
-  convert = makeGeneratedSticker, timeoutMs = 240_000 }) {
+  convert = animated ? makeAnimatedSticker : makeGeneratedSticker, timeoutMs = 240_000 }) {
   if (!apiKey) throw new ImageEditError('not_configured');
   if (!Array.isArray(images) || images.length > MAX_STICKER_IMAGES || images.some((image) =>
     !Buffer.isBuffer(image) || !image.length || image.length > MAX_INPUT_BYTES)) throw new ImageEditError('invalid_request');
-  if (typeof prompt !== 'string' || !prompt.trim() || prompt.length > MAX_PROMPT_LENGTH
+  if (typeof animated !== 'boolean' || typeof prompt !== 'string' || !prompt.trim() || prompt.length > MAX_PROMPT_LENGTH
       || !['low', 'medium', 'high', 'xhigh', 'max', 'auto'].includes(quality)) throw new ImageEditError('invalid_request');
   const requestSignal = AbortSignal.any([AbortSignal.timeout(timeoutMs), ...(signal ? [signal] : [])]);
   requestSignal.throwIfAborted();
   let body, headers = { Authorization: `Bearer ${apiKey}` };
   const params = { model: IMAGE_MODEL, prompt: mode === 'reference' ? INSTRUCTIONS + prompt.trim() : prompt.trim(),
     n: 1, size: '1024x1024', quality, background: mode === 'reference' ? 'opaque' : 'auto', output_format: 'png' };
+  if (animated) params.prompt = ANIMATION_INSTRUCTIONS + params.prompt;
   const editing = mode === 'reference' || images.length > 0;
   if (editing) {
     const form = new FormData();

@@ -7,11 +7,26 @@ This covers `/sticker`, `/euvousticker`, `/sticker-test`, and their mention form
 Available owner commands:
 
 - `/sticker <description>`: create artwork from the exact user prompt, optionally using photos supplied with the command. No imposed caption style, cutout requirement or other creative template is added.
+- `/sticker --animated <description>`: create a short looping animated sticker. Example: `/sticker --animated a dragon flapping its wings`. `--gif` is an alias for `--animated`; place either flag before the description. Both flags also work with `/euvousticker`, photo captions, photo albums, quoted photos and actual Dobby mentions.
 - `/euvousticker <theme or scene>`: customize the original `assets/stickers/default-reference.png`. A nonempty theme/description is required. Preserve the original man, pose, framing and surroundings by default, adding themed clothing and details. Explicitly requested pose/scene changes and major creative transformations are allowed. Output has an opaque, full-frame square background.
 - For requested Eu Vou captions, default to bottom left (or another position when the composition clearly calls for it), plain readable black square sans-serif text, perfectly horizontal, without a box, outline, shadow or decoration. Only add text when requested; explicit placement and elaborate typography requests override defaults.
 - Actual mentions work too: `@Dobby sticker a dancing dragon` and `@Dobby euvousticker beach holiday, caption "Eu vou"`. Select Dobby from WhatsApp's mention picker. `/status` and `@Dobby status` return NFT prices in the same group or DM. Scheduled price alerts retain their configured destination.
 
 Dobby acknowledges accepted image work once, quoting the command, then sends a native sticker in that same chat. If acknowledgement is uncertain, no paid image request starts. The free `/sticker-test` transport diagnostic remains available.
+
+## Animated stickers
+
+Use `/sticker --gif a cat waving` or `/euvousticker --animated dancing at a festival`. Animation is opt-in; ordinary descriptions still produce static stickers. A description is required after the flag. The acknowledgement explicitly says “animated sticker”.
+
+Animated requests use the existing image model and API key to generate one 1024 × 1024 sprite sheet containing 16 consecutive frames in a 4 × 4 grid. The bot extracts frames in reading order, enlarges each 256 × 256 cell to 512 × 512, and encodes a two-second loop at eight frames per second. The prompt asks for consistent composition, motion and a seamless loop. Frame alignment and motion quality depend on the model following those layout instructions; complex scenes may flicker and have less detail than static stickers. This is frame animation generated with the Image API, not a video-generation integration.
+
+WhatsApp receives an animated WebP marked `isAnimated`, which plays as a native sticker; the bot does not send a `.gif` attachment. Animated output is limited to 500,000 bytes, 512 × 512 per frame, at most 16 frames, and at most ten seconds with frame delays of at least 8 ms. Every decoded frame must have visible artwork. The bot rejects invalid sheets, wholly blank frames, and output that collapses to a static image or cannot fit the size cap. It never silently substitutes a still sticker for an animation request. Photo inputs remain static JPEG, PNG or WebP; uploading existing GIFs or videos for conversion is not supported by this command.
+
+Animation uses one paid image request and shares the existing daily attempt cap, cooldown, single-job slot, timeouts, cancellation and no-retry behavior. The flag is removed from the creative description and recorded as an animation boolean in the audit; image data and raw prompts remain out of logs. No new runtime dependency, credential or configuration is required.
+
+Sources: [OpenAI Image API output formats](https://developers.openai.com/api/docs/guides/image-generation#output-format), [WhatsApp animated sticker requirements](https://github.com/WhatsApp/stickers/blob/main/iOS/README.md#sticker-art-and-app-requirements), [Sharp animation input](https://sharp.pixelplumbing.com/api-constructor/).
+
+Local animation validation on 10 September 2026: `npm run verify` passed syntax checks and all 125 tests on Node.js 24.21.0. Tests perform real frame extraction, WebP encoding and decoding, and mocked API and WhatsApp delivery. They check frame order, transparency, timing, byte limits, malformed output, both flags and modes, shared budgeting and rejection of static results for animation requests. No paid generation, live WhatsApp send or deployment was performed; actual model layout quality and client playback still need a deployment smoke test.
 
 ## Using your own photos
 
@@ -47,7 +62,7 @@ Quality accepts low, medium, high, xhigh, max or auto. The daily cap (1–1000) 
 
 One image request may be pending or running at once; requests share a per-chat one-minute cooldown. Jobs run asynchronously so price monitoring continues. Shutdown aborts generation and waits for bookkeeping. Requests have a four-minute generation deadline and bounded response/image sizes; uncertain paid work and sends are never automatically retried. Reconnection, expiry or shutdown suppress late replies. Cancellation does not guarantee cancellation of provider billing.
 
-The PNG is decoded, resized to 512 × 512 and compressed to static WebP at or below 100,000 bytes. Opaque and transparent artwork are both valid; wholly transparent, corrupt, oversized and animated images are rejected. Square opaque inputs remain full-frame opaque images. Generated images remain in memory. Logs retain only safe diagnostic fields and token counts; audits retain destination, mode, model and a prompt hash, not raw prompts, keys or images.
+For static requests, the PNG is decoded, resized to 512 × 512 and compressed to static WebP at or below 100,000 bytes. Opaque and transparent artwork are both valid; wholly transparent, corrupt, oversized and animated source images are rejected. Square opaque inputs remain full-frame opaque images. Animated requests use the separate sheet conversion described above. Generated images remain in memory. Logs retain only safe diagnostic fields and token counts; audits retain destination, mode, animation selection, model and a prompt hash, not raw prompts, keys or images.
 
 Run `npm ci --include=optional` and `npm run verify` using Node.js 24. Tests mock the image provider and WhatsApp transport while performing real image conversion. Do not start a second bot with the production WhatsApp session. Deployment should run the checks on Linux and verify real output and delivery in an unregistered group and a DM.
 

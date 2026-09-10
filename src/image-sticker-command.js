@@ -26,7 +26,9 @@ export class ImageStickerCommand extends StickerCommand {
   }
   request(id, message, prompt, mode = 'freeform') {
     if (!['freeform', 'reference'].includes(mode) || typeof prompt !== 'string' || this.signal?.aborted || !super.request(id, message)) return false;
-    this.pending.prompt = prompt.trim();
+    const animationFlag = /^--(?:animated|gif)(?:\s+|$)/i.exec(prompt.trim());
+    this.pending.animated = Boolean(animationFlag);
+    this.pending.prompt = animationFlag ? prompt.trim().slice(animationFlag[0].length).trim() : prompt.trim();
     this.pending.mode = mode;
     return true;
   }
@@ -75,7 +77,7 @@ export class ImageStickerCommand extends StickerCommand {
     if (!request.prompt || request.prompt.length > MAX_PROMPT_LENGTH) {
       await this.note(request, request.mode === 'reference'
         ? 'Use /euvousticker followed by an overall theme or scene, up to 4,000 characters. Example: /euvousticker beach holiday, caption "Eu vou"'
-        : 'Use /sticker followed by a description, up to 4,000 characters. Example: /sticker a dancing dragon');
+        : 'Use /sticker followed by a description, up to 4,000 characters. Example: /sticker a dancing dragon. For animation: /sticker --animated a dragon flapping its wings');
       return;
     }
     if (!this.apiKey) {
@@ -98,7 +100,7 @@ export class ImageStickerCommand extends StickerCommand {
     if (!this.available(request)) return;
     const acknowledged = await this.deliver(request, 'sticker-processing',
       (id) => this.whatsapp.replyText(id,
-        `Dobby’s on it 🪄 I’m making your sticker${images.length ? ` using ${images.length} photo${images.length === 1 ? '' : 's'}` : ''} and will send it here when it’s ready. It may take a couple of minutes.`,
+        `Dobby’s on it 🪄 I’m making your ${request.animated ? 'animated ' : ''}sticker${images.length ? ` using ${images.length} photo${images.length === 1 ? '' : 's'}` : ''} and will send it here when it’s ready. It may take a couple of minutes.`,
         request.message));
     if (!acknowledged || !this.available(request)) return;
     // The acknowledgement can cross midnight; reserve against the generation day.
@@ -109,7 +111,7 @@ export class ImageStickerCommand extends StickerCommand {
     this.store.transaction(() => {
       this.store.set('image-sticker-budget', { day, used: used + 1 });
       this.store.reserve(jobId, { kind: 'sticker-generation', chatId: request.chatId, model: IMAGE_MODEL, mode: request.mode,
-        imageCount: images.length,
+        imageCount: images.length, animated: request.animated,
         promptHash: createHash('sha256').update(request.prompt).digest('hex') }, this.now());
     });
     let result, asset;
@@ -117,12 +119,13 @@ export class ImageStickerCommand extends StickerCommand {
     let stage = request.mode === 'reference' || images.length ? 'image_edit' : 'image_generation';
     try {
       result = await this.generate({ prompt: request.prompt, apiKey: this.apiKey, mode: request.mode,
-        quality: this.quality, signal: this.signal, images });
+        quality: this.quality, signal: this.signal, images, animated: request.animated });
       stage = 'sticker_validation';
-      asset = await validateGeneratedSticker(result.sticker);
+      asset = await validateGeneratedSticker(result.sticker, { requireAnimated: request.animated });
       this.store.finish(jobId, 'generated', this.now());
       this.log('sticker_generated', { model: IMAGE_MODEL, generationId: jobId,
-        elapsedMs: this.now() - startedAt, bytes: asset.bytes, usage: result.usage });
+        elapsedMs: this.now() - startedAt, bytes: asset.bytes, animated: asset.animated,
+        frames: asset.frames, durationMs: asset.durationMs, usage: result.usage });
     } catch (error) {
       this.store.finish(jobId, 'uncertain', this.now());
       const details = imageErrorDetails(error);

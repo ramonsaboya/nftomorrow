@@ -180,9 +180,9 @@ export class WhatsApp {
   }
   async sendGeneratedSticker(id, stickerBuffer, quotedMessage) {
     const generation = this.generation;
-    await validateGeneratedSticker(stickerBuffer);
+    const asset = await validateGeneratedSticker(stickerBuffer);
     if (generation !== this.generation) throw new Error('WhatsApp connection changed while validating sticker');
-    return this.#reply(id, { sticker: stickerBuffer, mimetype: 'image/webp' }, quotedMessage);
+    return this.#reply(id, { sticker: stickerBuffer, mimetype: 'image/webp', isAnimated: asset.animated }, quotedMessage);
   }
   async replyText(id, text, quotedMessage) {
     return this.#reply(id, { text, linkPreview: null }, quotedMessage);
