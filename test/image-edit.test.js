@@ -35,12 +35,14 @@ test('revisions upload the current sticker and original photos with ordered edit
         assert.match(prompt, /Original prompt: A DJ/);
         assert.match(prompt, /Earlier edits in order: \["Add a hat"\]/);
         assert.match(prompt, /Latest change request: Make the hat red/);
+        assert.match(prompt, /Preserve its background and framing unless asked to change them/);
+        assert.match(prompt, /use the original photos to restore it/);
         return Response.json({ data: [{ b64_json: png.toString('base64') }] });
       } });
   }
 });
 
-test('attached images and exact text use multipart edits; Eu Vou keeps the original first', async () => {
+test('attached photos get preservation defaults and user text; Eu Vou keeps the original first', async () => {
   for (const generate of [generateSticker, editReference]) {
     await generate({ prompt: 'Use these photos together', apiKey: 'test', images: [png, png],
       fetchImpl: async (url, options) => {
@@ -49,10 +51,32 @@ test('attached images and exact text use multipart edits; Eu Vou keeps the origi
         const files = options.body.getAll('image[]');
         assert.equal(files.length, generate === editReference ? 3 : 2);
         assert.deepEqual(Buffer.from(await files.at(-1).arrayBuffer()), png);
-        if (generate === generateSticker) assert.equal(options.body.get('prompt'), 'Use these photos together');
+        if (generate === generateSticker) {
+          assert.match(options.body.get('prompt'), /preserve the original background, surroundings, framing and subject identity/);
+          assert.match(options.body.get('prompt'), /User request: Use these photos together$/);
+        }
         else assert.deepEqual(Buffer.from(await files[0].arrayBuffer()), await readFile(REFERENCE_URL));
         return Response.json({ data: [{ b64_json: png.toString('base64') }] });
       } });
+  }
+});
+
+test('photo edits preserve the scene by default while allowing explicit cutouts, also in animation', async () => {
+  for (const animated of [false, true]) {
+    for (const prompt of ['make a sticker of this girl with hearts in front of the eyes',
+      'Remove the background and make a transparent cutout']) {
+      await generateSticker({ prompt, animated, apiKey: 'test', images: [png], convert: async (image) => image,
+        fetchImpl: async (_url, options) => {
+          const sent = options.body.get('prompt');
+          assert.match(sent, /not a request to remove or replace the background/);
+          assert.match(sent, /Do not isolate the subject, add a white or solid-color backdrop/);
+          assert.match(sent, /Explicit requests.*take precedence over these defaults/);
+          assert.ok(sent.endsWith('User request: ' + prompt));
+          assert.equal(sent.includes('Create a sprite sheet'), animated);
+          assert.equal(options.body.get('background'), 'auto');
+          return Response.json({ data: [{ b64_json: png.toString('base64') }] });
+        } });
+    }
   }
 });
 

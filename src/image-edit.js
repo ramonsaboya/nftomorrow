@@ -9,6 +9,13 @@ export const IMAGE_MODEL = 'gpt-image-2.5-sunburst';
 export const REFERENCE_URL = new URL('../assets/stickers/default-reference.png', import.meta.url);
 export const MAX_PROMPT_LENGTH = 4000;
 const MAX_RESPONSE_BYTES = 16 * 1024 * 1024;
+const PHOTO_INSTRUCTIONS = 'Edit the supplied photos according to the user request. '
+  + 'By default preserve the original background, surroundings, framing and subject identity; change only the requested details. '
+  + 'The word sticker describes the WhatsApp output format, not a request to remove or replace the background. '
+  + 'Do not isolate the subject, add a white or solid-color backdrop, or add a cutout outline or border unless explicitly requested. '
+  + 'Explicit requests for a different scene, transparency, a cutout or another style take precedence over these defaults. '
+  + 'When combining photos, follow the requested composition and retain the relevant surroundings unless asked otherwise. '
+  + '\nUser request: ';
 const ANIMATION_INSTRUCTIONS = `Create a sprite sheet for a seamless two-second looping animated sticker. `
   + `Output exactly ${ANIMATION_FRAMES} consecutive animation frames in a ${ANIMATION_GRID} by ${ANIMATION_GRID} grid on a 1024x1024 canvas. `
   + 'Each cell is exactly 256x256 pixels; frames run left-to-right, then top-to-bottom. '
@@ -90,10 +97,14 @@ async function createImage({ prompt, apiKey, quality = 'max', signal, mode, imag
   let body, headers = { Authorization: `Bearer ${apiKey}` };
   const params = { model: IMAGE_MODEL, prompt: mode === 'reference' ? INSTRUCTIONS + prompt.trim() : prompt.trim(),
     n: 1, size: '1024x1024', quality, background: mode === 'reference' ? 'opaque' : 'auto', output_format: 'png' };
+  if (mode === 'freeform' && images.length) params.prompt = PHOTO_INSTRUCTIONS + prompt.trim();
   if (animated) params.prompt = ANIMATION_INSTRUCTIONS + params.prompt;
   if (revision) params.prompt = (animated ? ANIMATION_INSTRUCTIONS : '')
     + 'Edit the supplied current sticker. Preserve its identity, composition and all details unless the latest request changes them. '
+    + 'Preserve its background and framing unless asked to change them; sticker refers to the output format, not a cutout style. '
+    + 'Do not add a white backdrop, remove the background or add an outline unless explicitly requested. '
     + 'Use the original photos for identity and details, and the original prompt and earlier edits as context. '
+    + 'If asked to restore the original photo background, use the original photos to restore it while retaining the other requested edits. '
     + 'The latest request takes precedence over earlier instructions. '
     + (animated ? 'The current sticker image shows its first frame; preserve the requested motion while applying the edit. ' : '')
     + '\nOriginal prompt: ' + revision.originalPrompt

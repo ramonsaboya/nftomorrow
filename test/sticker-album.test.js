@@ -155,7 +155,8 @@ test('fresh WhatsApp album becomes one paid multipart request with all photos an
         requests++;
         assert.match(url, /images\/edits$/);
         assert.equal(options.body.getAll('image[]').length, 4);
-        assert.equal(options.body.get('prompt'), 'use everyone');
+        assert.match(options.body.get('prompt'), /preserve the original background/);
+        assert.match(options.body.get('prompt'), /User request: use everyone$/);
         return Response.json({ data: [{ b64_json: png.toString('base64') }] });
       } }) });
     wa.connect({ state: { creds: { me: { id: '999@s.whatsapp.net' } } }, saveCreds() {} });
