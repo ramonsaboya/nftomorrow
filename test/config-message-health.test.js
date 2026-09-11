@@ -25,15 +25,15 @@ test('compact USD message converts the total and shows the matching fresh SOL ra
   });
   validateConfig({ groupId: null, displayCurrency: 'USD', thresholds: [] });
   const text = formatPrices(snapshot, { displayCurrency: 'USD', now });
-  assert.equal(text, 'Medallion:\n  450.75 USD\n  3.00 SOL\n\n1 SOL = 150.25 USD\n\n\nLetter: 1.00 SOL\nReflection: 1.00 SOL\nSymbol: 1.00 SOL\n\n07 Sept 2026, 19:05 BST');
-  assert.match(text, /Reflection: 1.00 SOL/);
-  assert.match(text, /1 SOL = 150\.25 USD/);
+  assert.equal(text, "```\nMedallion:\n                              450.75 USD\n                                3.00 SOL\n\n1 SOL =                       150.25 USD\n\nA Letter from the Universe:     1.00 SOL\nThe Reflection of Love:         1.00 SOL\nThe Symbol of Love and Unity:   1.00 SOL\n```\n\n07 Sept 2026, 19:05 BST");
+  assert.match(text, /The Reflection of Love: +1.00 SOL/);
+  assert.match(text, /1 SOL = +150\.25 USD/);
   assert.match(text, /19:05 BST$/);
   assert.doesNotMatch(text, /https:|TEST|Fees|changes since/);
   snapshot.fx.updatedAt -= 300_001;
   const stale = formatPrices(snapshot, { displayCurrency: 'USD', now });
-  assert.match(stale, /Medallion:\n  USD unavailable\n  3.00 SOL/);
-  assert.match(stale, /1 SOL = unavailable/);
+  assert.match(stale, /Medallion:\n +unavailable USD\n +3.00 SOL/);
+  assert.match(stale, /1 SOL = +unavailable USD/);
   assert.doesNotMatch(stale, /150\.25|450\.75/);
 });
 test('health failure signals email integration without revealing ping secrets in logs', async () => {

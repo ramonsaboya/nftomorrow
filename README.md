@@ -31,20 +31,19 @@ The original proposal in [docs/brief.md](docs/brief.md) is historical. The behav
 
 ```text
 Medallion:
-  6,734.35 USD
-  64.80 SOL
+                              450.75 USD
+                                3.00 SOL
 
-1 SOL = 103.93 USD
+1 SOL =                       150.25 USD
 
+A Letter from the Universe:     1.00 SOL
+The Reflection of Love:         1.00 SOL
+The Symbol of Love and Unity:   1.00 SOL
 
-Letter: 49.00 SOL
-Reflection: 13.70 SOL
-Symbol: 2.10 SOL
-
-07 Sept 2026, 18:11 BST
+07 Sept 2026, 19:05 BST
 ```
 
-Illustrative prices. Alert messages append a short triggered-threshold line.
+Prices use a WhatsApp monospace block to keep the amounts right-aligned. The timestamp follows outside the block. Illustrative prices. Alert messages append a short triggered-threshold line.
 
 Floors are lowest listed asking prices across aggregated marketplaces, excluding fees, not guaranteed sale values. The Medallion is the sum of the three floors. Invalid/missing/zero values invalidate a collection check; cached values never fill gaps. Stats have no guaranteed upstream listing freshness timestamp. Fiat rates older than five minutes never trigger fiat alerts. If FX fails, SOL stays available and the price health check fails.
 
