@@ -30,14 +30,18 @@ The original proposal in [docs/brief.md](docs/brief.md) is historical. The behav
 ## Message
 
 ```text
-Medallion: 6,734.35 USD (64.797 SOL)
-A Letter from the Universe: 49 SOL
-The Reflection of Love: 13.699 SOL
-The Symbol of Love and Unity: 2.098 SOL
+Medallion:
+  6,734.35 USD
+  64.80 SOL
 
-SOL -> USD: 103.93 USD
+1 SOL = 103.93 USD
 
-Date checked: 07 Sept 2026, 18:11 BST
+
+Letter: 49.00 SOL
+Reflection: 13.70 SOL
+Symbol: 2.10 SOL
+
+07 Sept 2026, 18:11 BST
 ```
 
 Illustrative prices. Alert messages append a short triggered-threshold line.

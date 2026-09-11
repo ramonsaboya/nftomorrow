@@ -22,7 +22,7 @@ test('test command reserves a single fresh message before sending and records ac
         assert.equal(record.id, id);
         assert.equal(record.status, 'attempting');
         assert.match(text, /^Medallion:/);
-        assert.match(text, /Medallion: 3 SOL/);
+        assert.match(text, /Medallion:\n  3.00 SOL/);
       } },
     });
     assert.equal(count, 1);

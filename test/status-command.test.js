@@ -51,8 +51,8 @@ test('fresh status replies are audited and leave automatic alert and summary sch
     assert.equal(h.command.request('request-1'), true);
     await h.command.runPending();
     assert.equal(h.fetches(), 1);
-    assert.match(h.sends[0].text, /Medallion: 300.00 USD \(3 SOL\)/);
-    assert.match(h.sends[0].text, /Date checked:/);
+    assert.match(h.sends[0].text, /Medallion:\n  300.00 USD\n  3.00 SOL/);
+    assert.match(h.sends[0].text, /08 Sept 2026, 13:00 BST$/);
     assert.equal(h.store.deliveries()[0].data.kind, 'status');
     assert.equal(h.store.deliveries()[0].status, 'acknowledged');
     assert.deepEqual(h.store.get(monitor.stateKey), before);
@@ -107,7 +107,7 @@ test('failed prices report unavailable; failed FX still returns SOL with no cach
         return { ...await original(), fx: null, fxFailed: true };
       };
       h.command.request('one'); await h.command.runPending();
-      assert.match(h.sends[0].text, failure === 'prices' ? /Current prices are unavailable/ : /USD unavailable \(3 SOL\)/);
+      assert.match(h.sends[0].text, failure === 'prices' ? /Current prices are unavailable/ : /USD unavailable\n  3.00 SOL/);
       assert.doesNotMatch(h.sends[0].text, /private upstream details/);
       assert.deepEqual(h.pings[0], ['prices', false]);
     } finally { h.store.close(); }
