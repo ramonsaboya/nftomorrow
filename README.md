@@ -10,6 +10,8 @@ Tomorrowland NFT price monitoring and Dobby WhatsApp commands, using Node.js, Ba
 
 ## Behavior
 
+- Optional [Tibo reset alerts](docs/reset-alerts.md): with `resetAlerts: true`, check public feeds every five minutes and send broad reset-related posts, hints and replies to the single phone account in `stickerOwnerJids`. Alerts contain a short excerpt and original X link. Existing posts are skipped at first activation; repeated retrievals do not duplicate messages. Third-party feeds may lag or omit posts.
+
 - `/sticker --animated a cat waving` creates a two-second animated sticker; `--gif` is an alias. Both flags work with `/euvousticker`, photo inputs and mentions. Output uses WhatsApp's animated WebP sticker format. See [animated sticker details](docs/image-stickers.md#animated-stickers).
 - Select up to 25 photos together in WhatsApp and add `/sticker <description>` as the caption. Dobby uses the whole album and prompt for one sticker, and confirms the photo count before generating. `/euvousticker` also accepts albums. See [photo input details](docs/image-stickers.md#using-your-own-photos).
 

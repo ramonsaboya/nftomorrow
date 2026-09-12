@@ -8,6 +8,21 @@ import { sqliteAuth } from '../src/auth.js';
 import { WhatsApp, parseCommand } from '../src/whatsapp.js';
 import sharp from 'sharp';
 
+test('reset alert transport permits only the allowlisted private phone account', async () => {
+  const h = harness({ stickerOwnerJids: ['777@s.whatsapp.net', '888@lid'] });
+  try {
+    await h.wa.start();
+    h.sockets[0].ev.emit('connection.update', { connection: 'open' });
+    await h.wa.sendResetAlert('reset-1', 'Tibo posted about resets', '777@s.whatsapp.net');
+    assert.equal(h.sends[0].group, '777@s.whatsapp.net');
+    assert.equal(h.sends[0].message.linkPreview, null);
+    for (const recipient of ['12345@g.us', '999@s.whatsapp.net', '888@lid']) {
+      await assert.rejects(h.wa.sendResetAlert('bad', 'text', recipient));
+    }
+    assert.equal(h.sends.length, 1);
+  } finally { await h.wa.stop(); h.store.close(); }
+});
+
 test('Baileys encodes four status images as children of one native media album', async () => {
   const h = harness();
   try {
@@ -82,7 +97,7 @@ test('all commands accept slash or verified Dobby mentions and preserve theme an
   }
 });
 
-function harness({ paired = true, registered = false, loggedOut = false, onCommand, now } = {}) {
+function harness({ paired = true, registered = false, loggedOut = false, onCommand, now, stickerOwnerJids } = {}) {
   const store = new Store(':memory:');
   const auth = sqliteAuth(store);
   auth.state.creds.registered = registered;
@@ -92,7 +107,7 @@ function harness({ paired = true, registered = false, loggedOut = false, onComma
   const sockets = [], timers = [], statuses = [], sends = [];
   let fresh = 0;
   const wa = new WhatsApp({ store, groupId: '12345@g.us',
-    onCommand, now,
+      onCommand, now, stickerOwnerJids,
     onStatus: (status) => statuses.push(status), onFresh: () => fresh++,
     schedule: (fn, delay) => { timers.push({ fn, delay }); return timers.length; }, cancel: () => {},
     makeSocket: (options) => {

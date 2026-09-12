@@ -42,6 +42,7 @@ export class WhatsApp {
     now = Date.now, stickerOwnerJids = [],
     log = () => {}, makeSocket = makeWASocket, schedule = setTimeout, cancel = clearTimeout }) {
     Object.assign(this, { store, groupId, onFresh, onStatus, onCommand, onQr, now, log, makeSocket, schedule, cancel });
+    this.stickerOwnerJids = [...stickerOwnerJids];
     this.connected = false;
     this.generation = 0;
     this.attempt = 0;
@@ -187,6 +188,12 @@ export class WhatsApp {
       { text, linkPreview: null }, { messageId: id }), 30_000);
     if (result?.key?.id !== id) throw new Error('Missing WhatsApp send acknowledgement');
     return result;
+  }
+  async sendResetAlert(id, text, recipient) {
+    if (!/^\d+@s\.whatsapp\.net$/.test(recipient ?? '') || !this.stickerOwnerJids.includes(recipient)) {
+      throw new Error('Reset alerts require an allowlisted private recipient');
+    }
+    return this.replyStatus(id, text, recipient);
   }
   async #sendImages(id, caption, images, chatId) {
     if (!isStickerChat(chatId)) throw new Error('Invalid image recipient');

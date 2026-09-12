@@ -5,7 +5,11 @@ import { TARGETS } from './collections.js';
 const currencies = ['SOL', 'USD', 'GBP', 'EUR'];
 export function validateConfig(config) {
   if (!config || typeof config !== 'object' || Array.isArray(config)) throw new Error('Config must be an object');
-  const allowed = ['groupId', 'displayCurrency', 'thresholds', 'dailySummaryTime', 'stickerOwnerJids'];
+  const allowed = ['groupId', 'displayCurrency', 'thresholds', 'dailySummaryTime', 'stickerOwnerJids', 'resetAlerts'];
+  if (config.resetAlerts !== undefined && typeof config.resetAlerts !== 'boolean') throw new Error('resetAlerts must be boolean');
+  if (config.resetAlerts && new Set((config.stickerOwnerJids ?? []).filter(jid => typeof jid === 'string' && /^\d+@s\.whatsapp\.net$/.test(jid))).size !== 1) {
+    throw new Error('Reset alerts require exactly one sticker-owner phone account');
+  }
   if (Object.keys(config).some((key) => !allowed.includes(key))) throw new Error('Unknown config option');
   if (config.stickerOwnerJids !== undefined && (!Array.isArray(config.stickerOwnerJids)
       || config.stickerOwnerJids.some((jid) => typeof jid !== 'string'

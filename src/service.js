@@ -11,6 +11,7 @@ import { StatusCommand } from './status-command.js';
 import { StickerCommand } from './sticker-command.js';
 import { ImageStickerCommand } from './image-sticker-command.js';
 import { finishCommand } from './shutdown.js';
+import { ResetWatch } from './reset-watch.js';
 
 process.umask(0o077);
 const log = (event, fields = {}) => console.log(JSON.stringify({ at: new Date().toISOString(), event, ...fields }));
@@ -53,6 +54,8 @@ try {
     },
   });
   const monitor = new Monitor({ config, store, whatsapp, health, apiKey, log });
+  const resetWatch = config.resetAlerts ? new ResetWatch({ config, store, whatsapp, log, signal: wake.signal }) : null;
+  if (resetWatch) log('reset_watch_started', { intervalSeconds: 300, recipient: 'sticker-owner', sources: ['recent', 'status', 'history'] });
   statusCommand = new StatusCommand({ config, store, whatsapp, health, apiKey, log });
   stickerCommand = new StickerCommand({ config, store, whatsapp, health, log });
   imageCommand = new ImageStickerCommand({ config, store, whatsapp, health, log,
@@ -73,6 +76,13 @@ try {
       ]);
     }
     if (stopped) break;
+    if (resetWatch?.due() && !resetWatch.inFlight) {
+      const task = resetWatch.poll().catch(() => {
+        log('fatal_reset_task'); process.exitCode = 1; stop();
+      });
+      background.add(task);
+      task.finally(() => background.delete(task));
+    }
     if (forceCheck || monitor.due()) {
       forceCheck = false;
       await monitor.poll();
