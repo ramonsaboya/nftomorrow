@@ -18,7 +18,7 @@ test('fetches complete aggregate floors and fresh optional conversion', async ()
   const calls = [];
   const snapshot = await fetchSnapshot(config, { now: () => now, request: async (url) => {
     calls.push(url);
-    return url.includes('coingecko') ? { solana: { gbp: 100, last_updated_at: now / 1000 } }
+    return url.includes('coingecko') ? { solana: { usd: 125, gbp: 100, last_updated_at: now / 1000 } }
       : { floorPrice: 2_000_000_000 };
   } });
   assert.equal(snapshot.lamports.medallion, 6_000_000_000);

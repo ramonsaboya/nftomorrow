@@ -1,7 +1,8 @@
 import { randomBytes } from 'node:crypto';
 import { fetchSnapshot, MAX_AGE_MS } from './prices.js';
-import { formatPrices } from './message.js';
+import { formatStatusCaption } from './message.js';
 import { isStickerChat } from './sticker.js';
+import { renderStatusImages, parseStatusDays, DAY_MS } from './status-images.js';
 
 // The service drains this single pending request in its main loop so shutdown
 // waits for delivery bookkeeping and requests cannot create unbounded work.
@@ -11,7 +12,9 @@ export class StatusCommand {
     Object.assign(this, { config, store, whatsapp, health, apiKey, now, getSnapshot, log });
     this.stateKey = `status-command:${config.groupId}`;
   }
-  request(id, chatId = this.config.groupId) {
+  request(id, chatId = this.config.groupId, range = '') {
+    const days = parseStatusDays(range);
+    if (days == null) return false;
     if (!isStickerChat(chatId) || !this.whatsapp.connected || this.pending || this.inFlight) return false;
     const now = this.now();
     const stateKey = `status-command:${chatId}`;
@@ -21,7 +24,7 @@ export class StatusCommand {
         || recent.some((entry) => entry.id === id)) return false;
     // Persist acceptance before any network work. Restart never replays a reply.
     this.store.set(stateKey, { lastAcceptedAt: now, recent: [...recent, { id, at: now }] });
-    this.pending = { generation: this.whatsapp.generation, at: now, chatId };
+    this.pending = { generation: this.whatsapp.generation, at: now, chatId, days };
     return true;
   }
   async runPending() {
@@ -40,7 +43,7 @@ export class StatusCommand {
     let snapshot = null, text;
     try {
       snapshot = await this.getSnapshot(this.config, { apiKey: this.apiKey });
-      text = formatPrices(snapshot, { displayCurrency: this.config.displayCurrency, now: this.now() });
+      text = formatStatusCaption(snapshot, { now: this.now() });
     } catch {
       snapshot = null;
       text = 'Current prices are unavailable because the fresh price check failed. Please try again in a minute.';
@@ -51,13 +54,21 @@ export class StatusCommand {
     if (!available()) return;
     // Revalidate after the health request; never label an aged snapshot current.
     if (snapshot) {
-      try { text = formatPrices(snapshot, { displayCurrency: this.config.displayCurrency, now: this.now() }); }
+      try { text = formatStatusCaption(snapshot, { now: this.now() }); }
       catch { return; }
     }
+    let images;
+    if (snapshot) {
+      try {
+        images = await renderStatusImages(snapshot, this.store.observationsSince(snapshot.observedAt - request.days * DAY_MS, snapshot.observedAt), { days: request.days, now: this.now() });
+      } catch { this.log('status_image_render_failed'); return; }
+      if (!available()) return;
+      try { text = formatStatusCaption(snapshot, { now: this.now() }); } catch { return; }
+    }
     const id = `3EB0${randomBytes(14).toString('hex').toUpperCase()}`;
-    this.store.reserve(id, { kind: 'status', chatId: request.chatId, snapshot, text }, this.now());
+    this.store.reserve(id, { kind: 'status', chatId: request.chatId, snapshot, text, days: request.days, imageCount: images?.length ?? 0 }, this.now());
     try {
-      await this.whatsapp.replyStatus(id, text, request.chatId);
+      await this.whatsapp.replyStatus(id, text, request.chatId, images);
       this.store.transaction(() => {
         this.store.finish(id, 'acknowledged', this.now());
         this.store.set('deliveryUncertain', false);

@@ -383,7 +383,7 @@ test('socket events route group and direct commands to quoted native stickers an
   const sent = [], accepted = [];
   let stickerCommand, statusCommand;
   const socket = { ev: new EventEmitter(), end() {}, async sendMessage(group, content, options) {
-    assert.equal(h.store.deliveries().find((entry) => entry.id === options.messageId).status, 'attempting');
+    assert.equal(h.store.deliveries().find((entry) => options.messageId.startsWith(entry.id)).status, 'attempting');
     sent.push({ group, content, options });
     return { key: { id: options.messageId } };
   } };
@@ -424,21 +424,22 @@ test('socket events route group and direct commands to quoted native stickers an
     assert.deepEqual(accepted, [{ id: 'valid-sticker', accepted: true }, { id: 'valid-sticker', accepted: false }]);
     await statusCommand.runPending();
     assert.equal(h.fetches(), 1);
-    assert.equal(sent.length, 2);
-    assert.match(sent[1].content.text, /Medallion:/);
+    assert.equal(sent.length, 6);
+    assert.match(sent[2].content.caption, /Medallion USD/);
+    assert.ok(sent.slice(2).every((entry) => Buffer.isBuffer(entry.content.image) && entry.group === '789@lid'));
     h.advance(61_000);
     emit([request]); // Even after cooldown, the same incoming ID remains suppressed.
     await stickerCommand.runPending();
-    assert.equal(sent.length, 2);
+    assert.equal(sent.length, 6);
     assert.deepEqual(accepted.at(-1), { id: 'valid-sticker', accepted: false });
     const ephemeral = message('fresh-sticker', { message: {
       ephemeralMessage: { message: { extendedTextMessage: { text: ' /STICKER-TEST ' } } },
     } });
     emit([ephemeral]);
     await stickerCommand.runPending();
-    assert.equal(sent.length, 3);
-    assert.strictEqual(sent[2].options.quoted, ephemeral);
-    assert.deepEqual(sent[2].content, { sticker: fixture, mimetype: 'image/webp' });
+    assert.equal(sent.length, 7);
+    assert.strictEqual(sent[6].options.quoted, ephemeral);
+    assert.deepEqual(sent[6].content, { sticker: fixture, mimetype: 'image/webp' });
     for (const chatId of ['447700900111@s.whatsapp.net', '1234567890@lid']) {
       const direct = message(`direct-${chatId}`, { key: { id: `direct-${chatId}`, remoteJid: chatId } });
       emit([direct]);
@@ -453,7 +454,7 @@ test('socket events route group and direct commands to quoted native stickers an
       await statusCommand.runPending();
     }
     assert.equal(sent.at(-1).group, '1234567890@lid');
-    assert.equal(sent.length, 7);
+    assert.equal(sent.length, 19);
     assert.equal(h.fetches(), 3, 'each private status request fetches current prices');
   } finally { await whatsapp.stop(); h.store.close(); }
 });

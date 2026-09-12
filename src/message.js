@@ -28,3 +28,16 @@ export function formatPrices(snapshot, { displayCurrency = null, now = Date.now(
   }
   return '\x60\x60\x60\n' + lines.join('\n') + '\n\x60\x60\x60\n\n' + checkedDate.format(snapshot.observedAt);
 }
+
+export function formatStatusCaption(snapshot, { now = Date.now() } = {}) {
+  validateSnapshot(snapshot, now);
+  const usd = priceIn(snapshot, 'medallion', 'USD', now);
+  const rows = [
+    [usd == null ? 'unavailable' : fiatNumber.format(usd), 'Medallion USD'],
+    [solNumber.format(snapshot.lamports.medallion / LAMPORTS_PER_SOL), 'Medallion SOL'],
+    [usd == null ? 'unavailable' : fiatNumber.format(snapshot.fx.rates.USD), 'SOL to USD'],
+  ];
+  const width = Math.max(...rows.map(([value]) => value.length));
+  return '\x60\x60\x60\n' + rows.map(([value, label]) => value.padStart(width) + '  ' + label).join('\n')
+    + '\n\x60\x60\x60\n\n' + checkedDate.format(snapshot.observedAt);
+}

@@ -6,6 +6,7 @@ import { isStickerChat, validateSticker } from './sticker.js';
 import { validateGeneratedSticker } from './generated-sticker.js';
 import { StickerAlbums } from './sticker-album.js';
 import { isStickerOwner } from './sticker-access.js';
+import { parseStatusDays } from './status-images.js';
 
 export function parseCommand(content, me) {
   const text = content?.conversation ?? content?.extendedTextMessage?.text ?? content?.imageMessage?.caption;
@@ -31,7 +32,8 @@ export function parseCommand(content, me) {
   const command = '/' + match[1].toLowerCase();
   if (content?.imageMessage && !['/sticker', '/euvousticker'].includes(command)) return null;
   const prompt = (match[2] ?? '').trim();
-  if (['/status', '/sticker-test'].includes(command) && prompt) return null;
+  if (command === '/sticker-test' && prompt) return null;
+  if (command === '/status' && parseStatusDays(prompt) == null) return null;
   return { command, prompt };
 }
 
@@ -101,7 +103,7 @@ export class WhatsApp {
           const parsed = parseCommand(content, auth.state.creds.me);
           if (this.albums.accept(message, content, parsed)) continue;
           if (parsed) this.onCommand(key.id, parsed.command, message,
-            ['/sticker', '/euvousticker'].includes(parsed.command) ? parsed.prompt : undefined);
+            ['/sticker', '/euvousticker', '/status'].includes(parsed.command) ? (parsed.prompt || undefined) : undefined);
           else {
             const reply = content?.extendedTextMessage;
             if (typeof reply?.text === 'string' && reply.text.trim()
@@ -168,18 +170,44 @@ export class WhatsApp {
       this.connect(auth);
     }, delay);
   }
-  async send(id, text) {
+  async send(id, text, images) {
+    if (images?.length) {
+      if (!/^\d+(?:-\d+)?@g\.us$/.test(this.groupId ?? '')) throw new Error('Invalid configured group');
+      return this.#sendImages(id, text, images, this.groupId);
+    }
     return this.#sendContent(id, { text, linkPreview: null });
   }
-  async replyStatus(id, text, chatId) {
+  async replyStatus(id, text, chatId, images) {
     if (!this.connected || !this.socket) throw new Error('WhatsApp unavailable');
     if (!isStickerChat(chatId)) {
       throw new Error('Invalid status recipient');
     }
+    if (images?.length) return this.#sendImages(id, text, images, chatId);
     const result = await withTimeout(this.socket.sendMessage(chatId,
       { text, linkPreview: null }, { messageId: id }), 30_000);
     if (result?.key?.id !== id) throw new Error('Missing WhatsApp send acknowledgement');
     return result;
+  }
+  async #sendImages(id, caption, images, chatId) {
+    if (!isStickerChat(chatId)) throw new Error('Invalid image recipient');
+    const generation = this.generation;
+    let albumParentKey;
+    if (images.length > 1) {
+      if (!this.connected || !this.socket) throw new Error('WhatsApp unavailable');
+      const parent = await withTimeout(this.socket.sendMessage(chatId,
+        { album: { expectedImageCount: images.length, expectedVideoCount: 0 } }, { messageId: id }), 30_000);
+      if (parent?.key?.id !== id) throw new Error('Missing WhatsApp send acknowledgement');
+      albumParentKey = { ...parent.key, remoteJid: chatId, fromMe: true };
+    }
+    for (let index = 0; index < images.length; index++) {
+      if (!this.connected || !this.socket || this.generation !== generation) throw new Error('WhatsApp unavailable');
+      const messageId = albumParentKey ? `${id}${index + 1}` : id;
+      const result = await withTimeout(this.socket.sendMessage(chatId,
+        { image: images[index], mimetype: 'image/png', ...(albumParentKey ? { albumParentKey } : {}),
+          ...(index === 0 ? { caption } : {}) },
+        { messageId }), 30_000);
+      if (result?.key?.id !== messageId) throw new Error('Missing WhatsApp send acknowledgement');
+    }
   }
   async sendSticker(id, stickerBuffer, quotedMessage) {
     validateSticker(stickerBuffer);

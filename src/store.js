@@ -70,6 +70,10 @@ export class Store {
         .run(id, chatId, sourceId, JSON.stringify(edits), sticker);
     });
   }
+  observationsSince(since, until = Date.now()) {
+    return this.db.prepare('SELECT data FROM observations WHERE observed_at >= ? AND observed_at <= ? ORDER BY observed_at, id')
+      .all(since, until).map((row) => JSON.parse(row.data));
+  }
   hasSticker(id, chatId) {
     return typeof id === 'string' && typeof chatId === 'string'
       && Boolean(this.db.prepare('SELECT 1 FROM sticker_versions WHERE id = ? AND chat_id = ?').get(id, chatId));

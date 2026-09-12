@@ -67,7 +67,7 @@ export async function fetchSnapshot(config, { request = getJson, now = Date.now,
   if (results.some((r) => r.status === 'rejected')) throw new Error('Incomplete Magic Eden price check');
   const lamports = Object.fromEntries(results.map((r) => r.value));
   lamports.medallion = Object.values(lamports).reduce((a, b) => a + b, 0);
-  const currencies = [...new Set([config.displayCurrency, ...config.thresholds.map((t) => t.currency)])]
+  const currencies = [...new Set(['USD', config.displayCurrency, ...config.thresholds.map((t) => t.currency)])]
     .filter((c) => c && c !== 'SOL');
   let fx = null;
   let fxFailed = false;

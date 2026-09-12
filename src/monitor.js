@@ -1,8 +1,9 @@
 import { randomBytes } from 'node:crypto';
 import { COLLECTIONS } from './collections.js';
 import { fetchSnapshot, priceIn, validateSnapshot } from './prices.js';
-import { formatPrices } from './message.js';
+import { formatPrices, formatStatusCaption } from './message.js';
 import { dailySlot, previousDate, HOUR_MS } from './schedule.js';
+import { renderStatusImages, DAY_MS } from './status-images.js';
 
 export class Monitor {
   constructor({ config, store, whatsapp, health, apiKey = '', now = Date.now,
@@ -66,15 +67,23 @@ export class Monitor {
       if (dueDaily) { state.dailySlot = slot; this.store.set(this.stateKey, state); }
       return;
     }
-    const text = formatPrices(snapshot, { displayCurrency: this.config.displayCurrency, now })
+    const text = (dueDaily ? formatStatusCaption(snapshot, { now }) : formatPrices(snapshot, { displayCurrency: this.config.displayCurrency, now }))
       + (alert ? '\n\nBelow threshold: ' + triggered.map(({ target, below, currency }) => {
         const name = target === 'medallion' ? 'Medallion' : COLLECTIONS.find(({ id }) => id === target).name;
         return `${name} < ${new Intl.NumberFormat('en-GB').format(below)} ${currency}`;
       }).join('; ') : '');
+    let images;
+    if (dueDaily) {
+      try {
+        images = await renderStatusImages(snapshot, this.store.observationsSince(snapshot.observedAt - 30 * DAY_MS, snapshot.observedAt), { now: this.now() });
+      } catch { this.log('status_image_render_failed'); return; }
+      if (!this.whatsapp.connected || generation !== this.whatsapp.generation) return;
+      validateSnapshot(snapshot, this.now());
+    }
     const id = `3EB0${randomBytes(14).toString('hex').toUpperCase()}`;
     this.store.transaction(() => {
       this.store.reserve(id, { kind: alert ? (dueDaily ? 'alert-and-summary' : 'alert') : 'summary',
-        groupId: this.config.groupId, snapshot, text, triggered }, now);
+        groupId: this.config.groupId, snapshot, text, triggered, imageCount: images?.length ?? 0 }, now);
       if (dueDaily) state.dailySlot = slot;
       if (alert) { state.lastAlertHour = hour; state.lastAlertSlot = slot; }
       // Commit BEFORE sending; crashes or uncertain acknowledgements are never
@@ -82,7 +91,7 @@ export class Monitor {
       this.store.set(this.stateKey, state);
     });
     try {
-      await this.whatsapp.send(id, text);
+      await this.whatsapp.send(id, text, images);
       this.store.transaction(() => {
         this.store.finish(id, 'acknowledged', this.now());
         this.store.set('deliveryUncertain', false);

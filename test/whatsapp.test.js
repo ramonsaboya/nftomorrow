@@ -6,6 +6,36 @@ import { DisconnectReason, generateWAMessage } from '@whiskeysockets/baileys';
 import { Store } from '../src/store.js';
 import { sqliteAuth } from '../src/auth.js';
 import { WhatsApp, parseCommand } from '../src/whatsapp.js';
+import sharp from 'sharp';
+
+test('Baileys encodes four status images as children of one native media album', async () => {
+  const h = harness();
+  try {
+    await h.wa.start();
+    h.sockets[0].ev.emit('connection.update', { connection: 'open' });
+    const encoded = [];
+    h.sockets[0].sendMessage = async (group, content, options) => {
+      const message = await generateWAMessage(group, content, { ...options, userJid: '999@s.whatsapp.net',
+        upload: async () => ({ mediaUrl: 'https://example.invalid/image', directPath: '/image' }),
+      });
+      encoded.push(message);
+      return message;
+    };
+    const png = await sharp({ create: { width: 64, height: 64, channels: 3, background: '#b3a1ff' } }).png().toBuffer();
+    await h.wa.replyStatus('album', '100.00  SOL to USD', '12345@g.us', [png, png, png, png]);
+    assert.equal(encoded.length, 5);
+    assert.equal(encoded[0].message.albumMessage.expectedImageCount, 4);
+    for (const child of encoded.slice(1)) {
+      assert.ok(child.message.imageMessage);
+      const association = child.message.messageContextInfo.messageAssociation;
+      assert.equal(association.associationType, 1);
+      assert.equal(association.parentMessageKey.id, encoded[0].key.id);
+      assert.equal(association.parentMessageKey.remoteJid, '12345@g.us');
+      assert.equal(association.parentMessageKey.fromMe, true);
+    }
+    assert.equal(encoded[1].message.imageMessage.caption, '100.00  SOL to USD');
+  } finally { await h.wa.stop(); h.store.close(); }
+});
 
 test('fresh plain replies route only for saved stickers in the same chat', async () => {
   const now = 1_800_000_000_000, commands = [];
@@ -75,6 +105,38 @@ function harness({ paired = true, registered = false, loggedOut = false, onComma
   });
   return { wa, store, sockets, timers, statuses, sends, fresh: () => fresh };
 }
+
+test('status range reaches the handler and image sequences stop on lost acknowledgement', async () => {
+  const now = 1_800_000_000_000, commands = [];
+  const h = harness({ now: () => now, onCommand: (...args) => commands.push(args) });
+  try {
+    await h.wa.start();
+    const socket = h.sockets[0];
+    socket.ev.emit('connection.update', { connection: 'open' });
+    socket.ev.emit('messages.upsert', { type: 'notify', messages: [{
+      key: { id: 'range', remoteJid: '789@lid' }, messageTimestamp: now / 1000,
+      message: { conversation: '/status 90d' },
+    }] });
+    assert.equal(commands[0][3], '90d');
+    const images = [1, 2, 3, 4].map((n) => Buffer.from([n]));
+    await h.wa.replyStatus('image', 'Prices', '789@lid', images);
+    assert.deepEqual(h.sends.map((s) => s.opts.messageId), ['image', 'image1', 'image2', 'image3', 'image4']);
+    assert.deepEqual(h.sends[0].message.album, { expectedImageCount: 4, expectedVideoCount: 0 });
+    assert.ok(h.sends.slice(1).every((s) => s.group === '789@lid' && s.message.mimetype === 'image/png'
+      && s.message.albumParentKey.id === 'image'));
+    assert.equal(h.sends[1].message.caption, 'Prices');
+    assert.equal(h.sends[2].message.caption, undefined);
+    let attempts = 0;
+    socket.sendMessage = async (_chat, _content, { messageId }) => {
+      attempts++;
+      return { key: { id: attempts === 2 ? 'wrong' : messageId } };
+    };
+    await assert.rejects(h.wa.send('partial', 'Prices', images), /acknowledgement/);
+    assert.equal(attempts, 2);
+    h.wa.groupId = '789@lid';
+    await assert.rejects(h.wa.send('invalid', 'Prices', images), /configured group/);
+  } finally { await h.wa.stop(); h.store.close(); }
+});
 test('temporary outage backs off, reconnects and requests fresh observation', async () => {
   const h = harness();
   await h.wa.start();

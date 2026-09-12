@@ -32,7 +32,7 @@ test('status cooldown and reply destination are independent across unregistered 
   try {
     const destinations = [];
     h.whatsapp.replyStatus = async (_id, text, chatId) => {
-      assert.match(text, /Medallion:/); destinations.push(chatId);
+      assert.match(text, /Medallion USD/); destinations.push(chatId);
     };
     for (const chat of ['999@g.us', '888-777@g.us']) {
       assert.equal(h.command.request('same-id', chat), true);
@@ -51,7 +51,7 @@ test('fresh status replies are audited and leave automatic alert and summary sch
     assert.equal(h.command.request('request-1'), true);
     await h.command.runPending();
     assert.equal(h.fetches(), 1);
-    assert.match(h.sends[0].text, /Medallion:\n +300.00 USD\n +3.00 SOL/);
+    assert.match(h.sends[0].text, /300.00  Medallion USD\n  3.00  Medallion SOL\n100.00  SOL to USD/);
     assert.match(h.sends[0].text, /08 Sept 2026, 13:00 BST$/);
     assert.equal(h.store.deliveries()[0].data.kind, 'status');
     assert.equal(h.store.deliveries()[0].status, 'acknowledged');
@@ -107,7 +107,7 @@ test('failed prices report unavailable; failed FX still returns SOL with no cach
         return { ...await original(), fx: null, fxFailed: true };
       };
       h.command.request('one'); await h.command.runPending();
-      assert.match(h.sends[0].text, failure === 'prices' ? /Current prices are unavailable/ : /unavailable USD\n +3.00 SOL/);
+      assert.match(h.sends[0].text, failure === 'prices' ? /Current prices are unavailable/ : /unavailable  Medallion USD\n +3.00  Medallion SOL/);
       assert.doesNotMatch(h.sends[0].text, /private upstream details/);
       assert.deepEqual(h.pings[0], ['prices', false]);
     } finally { h.store.close(); }
@@ -160,5 +160,20 @@ test('private status replies stay in the requesting chat', async () => {
     await h.command.runPending();
     assert.equal(h.sends[0].chatId, '789@lid');
     assert.equal(h.store.deliveries()[0].data.chatId, '789@lid');
+  } finally { h.store.close(); }
+});
+
+test('custom status range is audited with four album images', async () => {
+  const h = harness();
+  try {
+    let images;
+    h.whatsapp.replyStatus = async (_id, _text, _chat, buffers) => { images = buffers; };
+    assert.equal(h.command.request('invalid', '789@lid', '400d'), false);
+    assert.equal(h.command.request('range', '789@lid', '7d'), true);
+    await h.command.runPending();
+    assert.equal(images.length, 4);
+    assert.equal(h.store.deliveries()[0].data.days, 7);
+    assert.doesNotMatch(h.store.deliveries()[0].data.text, /\(1 SOL\)/);
+    assert.equal(h.store.deliveries()[0].data.imageCount, 4);
   } finally { h.store.close(); }
 });

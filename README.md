@@ -29,6 +29,41 @@ The original proposal in [docs/brief.md](docs/brief.md) is historical. The behav
 
 ## Message
 
+`/status` and daily summaries send a native WhatsApp album containing four separate PNG images: a summary
+with Medallion USD/SOL costs and SOL/USD conversion, NFT floor charts in USD and
+SOL (Medallion plus all three collections), and a SOL/USD chart. Current values
+are printed beneath every chart. Medallion lines, labels and summary values are
+always purple. SVG layouts are rasterized locally with Sharp;
+these status images do not use AI or an image-generation API.
+
+The default window is the last **30 days**. Use `/status 7d`, `/status 2w`,
+`/status 3m`, or a verified mention such as `@Dobby status 90d` to change it.
+Supported windows are 1–365 days; `w` means seven days and `m` means 30 days.
+Invalid ranges are ignored. Charts use stored observations only, with no backfill;
+USD history requires a recorded, fresh USD rate at each observation. Missing
+rates and observation gaps longer than three hours break chart lines. Sparse
+history is labelled. USD is now fetched regardless of the display currency.
+
+Hourly alerts retain their text format. The first album image includes three text values
+as its caption, with numbers padded on the left, followed by their descriptions
+in a monospace block (plus any coincident threshold alert):
+
+```text
+5,306.62  Medallion USD
+   33.60  Medallion SOL
+  157.94  SOL to USD
+```
+
+An uncertain message delivery is never automatically replayed.
+
+To render an offline preview from JSON containing `snapshot` and `history`:
+
+```sh
+node scripts/render-status.js input.json data/status-preview 30d
+```
+
+Text caption / hourly alert format:
+
 ```text
 Medallion:
                               450.75 USD
